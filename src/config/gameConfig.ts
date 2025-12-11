@@ -6,6 +6,11 @@ export const GAME_CONFIG = {
     JUMP_SPEED: 8,
     HEIGHT: 1.8,
     RADIUS: 0.5,
+    // ADS settings
+    ADS_FOV: 55,
+    DEFAULT_FOV: 75,
+    ADS_SPEED_MULTIPLIER: 0.5,
+    ADS_TRANSITION_SPEED: 10,
   },
 
   // Arena settings

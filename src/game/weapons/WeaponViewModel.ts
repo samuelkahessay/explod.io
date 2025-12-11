@@ -24,6 +24,12 @@ export class WeaponViewModel {
 
   // Position offsets
   private baseOffset: THREE.Vector3 = new THREE.Vector3(0.35, -0.35, -0.8);
+  private adsOffset: THREE.Vector3 = new THREE.Vector3(0, -0.2, -0.5);
+
+  // ADS state
+  private isAiming: boolean = false;
+  private adsProgress: number = 0;
+  private readonly ADS_LERP_SPEED: number = 10;
 
   // Muzzle offset relative to weapon group (where the barrel ends)
   private muzzleLocalOffset: THREE.Vector3 = new THREE.Vector3(0, 0, -0.66);
@@ -328,6 +334,17 @@ export class WeaponViewModel {
   }
 
   public update(deltaTime: number, isMoving: boolean, velocity: THREE.Vector3): void {
+    // Update ADS progress
+    const targetAds = this.isAiming ? 1 : 0;
+    this.adsProgress = THREE.MathUtils.lerp(
+      this.adsProgress,
+      targetAds,
+      deltaTime * this.ADS_LERP_SPEED
+    );
+
+    // Reduce bob when ADS (80% less bob when fully scoped)
+    const bobMultiplier = 1 - this.adsProgress * 0.8;
+
     // Update weapon bob based on movement
     if (isMoving && velocity.lengthSq() > 0.01) {
       this.bobTime += deltaTime * this.bobSpeed;
@@ -336,24 +353,25 @@ export class WeaponViewModel {
       this.bobTime = THREE.MathUtils.lerp(this.bobTime, 0, deltaTime * 3);
     }
 
-    // Calculate bob offset
-    const bobX = Math.sin(this.bobTime) * this.bobAmountX;
-    const bobY = Math.abs(Math.sin(this.bobTime * 2)) * this.bobAmountY;
+    // Calculate bob offset (reduced when ADS)
+    const bobX = Math.sin(this.bobTime) * this.bobAmountX * bobMultiplier;
+    const bobY = Math.abs(Math.sin(this.bobTime * 2)) * this.bobAmountY * bobMultiplier;
 
-    // Recover from recoil
+    // Recover from recoil (faster when ADS)
+    const recoilRecovery = this.recoilRecoverySpeed * (1 + this.adsProgress * 0.5);
     if (this.recoilAmount > 0) {
-      this.recoilAmount = Math.max(0, this.recoilAmount - deltaTime * this.recoilRecoverySpeed);
+      this.recoilAmount = Math.max(0, this.recoilAmount - deltaTime * recoilRecovery);
     }
 
     // Position weapon relative to camera
     const cameraMatrix = new THREE.Matrix4();
     cameraMatrix.copy(this.camera.matrixWorld);
 
-    // Calculate final position with bob and recoil
-    const offset = this.baseOffset.clone();
+    // Interpolate between base and ADS offset
+    const offset = this.baseOffset.clone().lerp(this.adsOffset, this.adsProgress);
     offset.x += bobX;
     offset.y += bobY;
-    offset.z += this.recoilAmount * 0.15; // Recoil pushes weapon back
+    offset.z += this.recoilAmount * 0.15 * (1 - this.adsProgress * 0.5); // Less recoil offset when ADS
 
     // Apply offset in camera space
     const worldOffset = offset.clone().applyMatrix4(
@@ -365,14 +383,23 @@ export class WeaponViewModel {
     // Match camera rotation with slight recoil rotation
     this.weaponGroup.quaternion.copy(this.camera.quaternion);
 
-    // Add recoil rotation (pitch up)
+    // Add recoil rotation (pitch up, reduced when ADS)
     const recoilRotation = new THREE.Quaternion();
-    recoilRotation.setFromEuler(new THREE.Euler(-this.recoilAmount * 0.3, 0, 0));
+    const recoilPitch = -this.recoilAmount * 0.3 * (1 - this.adsProgress * 0.5);
+    recoilRotation.setFromEuler(new THREE.Euler(recoilPitch, 0, 0));
     this.weaponGroup.quaternion.multiply(recoilRotation);
   }
 
   public triggerRecoil(): void {
     this.recoilAmount = 1;
+  }
+
+  public setAiming(aiming: boolean): void {
+    this.isAiming = aiming;
+  }
+
+  public getAdsProgress(): number {
+    return this.adsProgress;
   }
 
   /**

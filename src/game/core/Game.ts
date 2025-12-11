@@ -72,6 +72,7 @@ export class Game {
     playerHealth: GAME_CONFIG.PLAYER.HEALTH,
     enemiesKilled: 0,
     timeElapsed: 0,
+    adsProgress: 0,
   };
 
   // Spawn timer
@@ -236,6 +237,14 @@ export class Game {
     // Update player
     this.player.update(deltaTime);
     this.state.playerHealth = this.player.health;
+
+    // Update FOV based on ADS state
+    const targetFOV = this.player.getIsAiming()
+      ? GAME_CONFIG.PLAYER.ADS_FOV
+      : GAME_CONFIG.PLAYER.DEFAULT_FOV;
+    this.sceneManager.setTargetFOV(targetFOV);
+    this.sceneManager.updateFOV(deltaTime);
+    this.state.adsProgress = this.player.getAdsProgress();
 
     // Update projectiles
     this.updateProjectiles(deltaTime);
@@ -795,6 +804,7 @@ export class Game {
       playerHealth: GAME_CONFIG.PLAYER.HEALTH,
       enemiesKilled: 0,
       timeElapsed: 0,
+      adsProgress: 0,
     };
 
     // Spawn initial enemies

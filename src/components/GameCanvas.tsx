@@ -7,6 +7,7 @@ import { GAME_CONFIG } from '@/config/gameConfig';
 import { ThemeType } from '@/config/themeConfig';
 import { getTheme } from '@/utils/settings';
 import HUD from './HUD';
+import Crosshair from './Crosshair';
 
 interface GameCanvasProps {
   onGameOver?: (score: number) => void;
@@ -24,13 +25,14 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onGameOver }) => {
     playerHealth: GAME_CONFIG.PLAYER.HEALTH,
     enemiesKilled: 0,
     timeElapsed: 0,
+    adsProgress: 0,
   });
 
   const [isLocked, setIsLocked] = useState(false);
   const [showGameOver, setShowGameOver] = useState(false);
-  const [theme, setTheme] = useState<ThemeType>('DEFAULT');
+  const [theme, setTheme] = useState<ThemeType | null>(null);
 
-  // Load theme on mount
+  // Load theme on mount - must complete before game initializes
   useEffect(() => {
     setTheme(getTheme());
   }, []);
@@ -42,9 +44,9 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onGameOver }) => {
     showGameOverRef.current = showGameOver;
   }, [showGameOver]);
 
-  // Initialize game
+  // Initialize game - wait for theme to load from localStorage
   useEffect(() => {
-    if (!containerRef.current) return;
+    if (!containerRef.current || theme === null) return;
 
     // Create game instance with theme
     const game = new Game(containerRef.current, theme);
@@ -116,6 +118,18 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onGameOver }) => {
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [showGameOver]);
 
+  // Show loading while theme loads
+  if (theme === null) {
+    return (
+      <div className="relative w-full h-screen bg-black flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-16 h-16 border-4 border-red-500 border-t-transparent rounded-full animate-spin mb-4 mx-auto" />
+          <p className="text-white text-xl">Loading...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="relative w-full h-screen bg-black">
       <div
@@ -135,17 +149,9 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onGameOver }) => {
         />
       )}
 
-      {/* Crosshair */}
+      {/* Crosshair - Dynamic based on ADS */}
       {isLocked && !showGameOver && (
-        <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 pointer-events-none">
-          <div className="relative w-6 h-6">
-            <div className="absolute top-1/2 left-0 w-2 h-0.5 bg-white -translate-y-1/2" />
-            <div className="absolute top-1/2 right-0 w-2 h-0.5 bg-white -translate-y-1/2" />
-            <div className="absolute left-1/2 top-0 w-0.5 h-2 bg-white -translate-x-1/2" />
-            <div className="absolute left-1/2 bottom-0 w-0.5 h-2 bg-white -translate-x-1/2" />
-            <div className="absolute top-1/2 left-1/2 w-1 h-1 bg-red-500 rounded-full -translate-x-1/2 -translate-y-1/2" />
-          </div>
-        </div>
+        <Crosshair adsProgress={gameState.adsProgress} />
       )}
 
       {/* Start Screen */}
@@ -170,8 +176,8 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onGameOver }) => {
             </button>
             <div className="mt-8 text-gray-400">
               <p className="mb-2">Controls:</p>
-              <p>WASD - Move | Mouse - Aim | Click - Fire</p>
-              <p>Space - Jump | ESC - Pause</p>
+              <p>WASD - Move | Mouse - Aim | Left Click - Fire</p>
+              <p>Right Click - Scope | Space - Jump | ESC - Pause</p>
             </div>
           </div>
         </div>

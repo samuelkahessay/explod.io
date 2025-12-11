@@ -8,9 +8,11 @@ export class InputManager {
     right: false,
     jump: false,
     fire: false,
+    aim: false,
   };
 
   private firePressed: boolean = false;
+  private aimPressed: boolean = false;
 
   // Mouse movement tracking for bullet time
   private mouseDelta: { x: number; y: number } = { x: 0, y: 0 };
@@ -25,7 +27,12 @@ export class InputManager {
     document.addEventListener('mousedown', this.onMouseDown);
     document.addEventListener('mouseup', this.onMouseUp);
     document.addEventListener('mousemove', this.onMouseMove);
+    document.addEventListener('contextmenu', this.onContextMenu);
   }
+
+  private onContextMenu = (event: MouseEvent): void => {
+    event.preventDefault();
+  };
 
   private onKeyDown = (event: KeyboardEvent): void => {
     switch (event.code) {
@@ -79,6 +86,9 @@ export class InputManager {
     if (event.button === 0) {
       this.firePressed = true;
       this.inputState.fire = true;
+    } else if (event.button === 2) {
+      this.aimPressed = true;
+      this.inputState.aim = true;
     }
   };
 
@@ -86,6 +96,9 @@ export class InputManager {
     if (event.button === 0) {
       this.firePressed = false;
       this.inputState.fire = false;
+    } else if (event.button === 2) {
+      this.aimPressed = false;
+      this.inputState.aim = false;
     }
   };
 
@@ -122,11 +135,12 @@ export class InputManager {
     const hasMouseMovement = this.mouseDelta.x > 0.5 || this.mouseDelta.y > 0.5;
     const hasFire = this.inputState.fire || this.firePressed;
     const hasJump = this.inputState.jump;
+    const hasAim = this.inputState.aim || this.aimPressed;
 
     // Reset mouse delta after checking
     this.mouseDelta = { x: 0, y: 0 };
 
-    return hasMovement || hasMouseMovement || hasFire || hasJump;
+    return hasMovement || hasMouseMovement || hasFire || hasJump || hasAim;
   }
 
   public dispose(): void {
@@ -135,5 +149,6 @@ export class InputManager {
     document.removeEventListener('mousedown', this.onMouseDown);
     document.removeEventListener('mouseup', this.onMouseUp);
     document.removeEventListener('mousemove', this.onMouseMove);
+    document.removeEventListener('contextmenu', this.onContextMenu);
   }
 }

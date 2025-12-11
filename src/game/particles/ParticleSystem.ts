@@ -64,7 +64,7 @@ export class ParticleSystem {
       transparent: options.transparent ?? true,
       blending: options.blending ?? THREE.AdditiveBlending,
       depthWrite: options.depthWrite ?? false,
-      map: options.texture,
+      ...(options.texture && { map: options.texture }),
       sizeAttenuation: true,
     });
 

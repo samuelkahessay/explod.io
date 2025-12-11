@@ -23,6 +23,12 @@ export class SceneManager {
   private currentBloomStrength: number = 0.3;
   private targetBloomStrength: number = 0.3;
 
+  // FOV configuration
+  private baseFOV: number = 75;
+  private targetFOV: number = 75;
+  private currentFOV: number = 75;
+  private readonly FOV_LERP_SPEED: number = 10;
+
   // Collidable object caching
   private cachedCollidables: THREE.Object3D[] = [];
   private collidablesDirty: boolean = true;
@@ -54,6 +60,7 @@ export class SceneManager {
     const aspect = container.clientWidth / container.clientHeight;
     this.camera = new THREE.PerspectiveCamera(75, aspect, 0.1, 1000);
     this.camera.position.set(0, 1.8, 0);
+    this.camera.layers.enableAll();
 
     // Renderer
     this.renderer = new THREE.WebGLRenderer({
@@ -118,31 +125,63 @@ export class SceneManager {
 
     if (this.usePostProcessing) {
       // Two-pass rendering: world first, then weapon on top
-      // Pass 1: Render world (layer 0 only)
+      // Pass 1: Render world (layer 0 only) with post-processing
       this.camera.layers.set(LAYER_DEFAULT);
       this.composer.render();
 
-      // Pass 2: Render weapon layer on top (clear depth only)
+      // Pass 2: Render weapon layer on top (clear depth only, preserve color)
       this.camera.layers.set(LAYER_WEAPON);
+
+      // Explicitly disable all auto-clearing to preserve pass 1
+      const prevAutoClear = this.renderer.autoClear;
+      const prevAutoClearColor = this.renderer.autoClearColor;
+      const prevAutoClearDepth = this.renderer.autoClearDepth;
+      const prevAutoClearStencil = this.renderer.autoClearStencil;
+
       this.renderer.autoClear = false;
+      this.renderer.autoClearColor = false;
+      this.renderer.autoClearDepth = false;
+      this.renderer.autoClearStencil = false;
+
       this.renderer.clearDepth();
       this.renderer.render(this.scene, this.camera);
-      this.renderer.autoClear = true;
+
+      // Restore previous settings
+      this.renderer.autoClear = prevAutoClear;
+      this.renderer.autoClearColor = prevAutoClearColor;
+      this.renderer.autoClearDepth = prevAutoClearDepth;
+      this.renderer.autoClearStencil = prevAutoClearStencil;
 
       // Reset camera to see all layers
       this.camera.layers.enableAll();
     } else {
       // Two-pass rendering without post-processing
-      // Pass 1: Render world
+      // Pass 1: Render world (layer 0 only)
       this.camera.layers.set(LAYER_DEFAULT);
       this.renderer.render(this.scene, this.camera);
 
-      // Pass 2: Render weapon layer on top
+      // Pass 2: Render weapon layer on top (clear depth only)
       this.camera.layers.set(LAYER_WEAPON);
+
+      // Explicitly disable all auto-clearing to preserve pass 1
+      const prevAutoClear = this.renderer.autoClear;
+      const prevAutoClearColor = this.renderer.autoClearColor;
+      const prevAutoClearDepth = this.renderer.autoClearDepth;
+      const prevAutoClearStencil = this.renderer.autoClearStencil;
+
       this.renderer.autoClear = false;
-      this.renderer.clearDepth();
+      this.renderer.autoClearColor = false;
+      this.renderer.autoClearDepth = false;
+      this.renderer.autoClearStencil = false;
+
+      this.renderer.clearDepth(); // Only clear depth so weapon renders on top
       this.renderer.render(this.scene, this.camera);
-      this.renderer.autoClear = true;
+
+      // Restore previous settings
+      this.renderer.autoClear = prevAutoClear;
+      this.renderer.autoClearColor = prevAutoClearColor;
+      this.renderer.autoClearDepth = prevAutoClearDepth;
+      this.renderer.autoClearStencil = prevAutoClearStencil;
 
       // Reset camera to see all layers
       this.camera.layers.enableAll();
@@ -177,6 +216,35 @@ export class SceneManager {
    */
   public getBloomStrength(): number {
     return this.currentBloomStrength;
+  }
+
+  /**
+   * Set target FOV for ADS zoom
+   */
+  public setTargetFOV(fov: number): void {
+    this.targetFOV = fov;
+  }
+
+  /**
+   * Update FOV with smooth interpolation
+   */
+  public updateFOV(deltaTime: number): void {
+    if (Math.abs(this.currentFOV - this.targetFOV) > 0.01) {
+      this.currentFOV = THREE.MathUtils.lerp(
+        this.currentFOV,
+        this.targetFOV,
+        deltaTime * this.FOV_LERP_SPEED
+      );
+      this.camera.fov = this.currentFOV;
+      this.camera.updateProjectionMatrix();
+    }
+  }
+
+  /**
+   * Get current FOV
+   */
+  public getCurrentFOV(): number {
+    return this.currentFOV;
   }
 
   public dispose(): void {

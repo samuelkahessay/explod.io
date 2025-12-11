@@ -24,6 +24,8 @@ export class Player extends Entity implements IDamageable {
   // State
   private canJump: boolean = true;
   private moveDirection: THREE.Vector3 = new THREE.Vector3();
+  private isAiming: boolean = false;
+  private baseSpeed: number = GAME_CONFIG.PLAYER.SPEED;
 
   // Weapon
   public weapon: RocketLauncher;
@@ -144,6 +146,15 @@ export class Player extends Entity implements IDamageable {
     if (input.left) this.moveDirection.x = -1;
     if (input.right) this.moveDirection.x = 1;
 
+    // Handle ADS state
+    this.isAiming = input.aim;
+    this.weaponViewModel.setAiming(this.isAiming);
+
+    // Adjust speed based on ADS (slower movement while aiming)
+    this.speed = this.isAiming
+      ? this.baseSpeed * GAME_CONFIG.PLAYER.ADS_SPEED_MULTIPLIER
+      : this.baseSpeed;
+
     if (input.jump && this.canJump) {
       this.velocity.y = this.JUMP_SPEED;
       this.canJump = false;
@@ -173,6 +184,14 @@ export class Player extends Entity implements IDamageable {
 
   public isDead(): boolean {
     return this.health <= 0;
+  }
+
+  public getIsAiming(): boolean {
+    return this.isAiming;
+  }
+
+  public getAdsProgress(): number {
+    return this.weaponViewModel.getAdsProgress();
   }
 
   public lock(): void {

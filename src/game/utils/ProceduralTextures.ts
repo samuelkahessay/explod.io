@@ -11,7 +11,10 @@ export class ProceduralTextures {
     const canvas = document.createElement('canvas');
     canvas.width = size;
     canvas.height = size;
-    const ctx = canvas.getContext('2d')!;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    if (!ctx) {
+      throw new Error('Failed to get canvas 2D context');
+    };
 
     // Base concrete color
     ctx.fillStyle = '#555555';
@@ -76,11 +79,13 @@ export class ProceduralTextures {
     map.wrapS = THREE.RepeatWrapping;
     map.wrapT = THREE.RepeatWrapping;
     map.repeat.set(4, 4);
+    map.needsUpdate = true;
 
     const normalMap = this.generateNormalMap(canvas);
     normalMap.wrapS = THREE.RepeatWrapping;
     normalMap.wrapT = THREE.RepeatWrapping;
     normalMap.repeat.set(4, 4);
+    normalMap.needsUpdate = true;
 
     return { map, normalMap };
   }
@@ -95,7 +100,10 @@ export class ProceduralTextures {
     const canvas = document.createElement('canvas');
     canvas.width = size;
     canvas.height = size;
-    const ctx = canvas.getContext('2d')!;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    if (!ctx) {
+      throw new Error('Failed to get canvas 2D context');
+    };
 
     // Base gray
     ctx.fillStyle = '#666666';
@@ -155,10 +163,12 @@ export class ProceduralTextures {
     const map = new THREE.CanvasTexture(canvas);
     map.wrapS = THREE.RepeatWrapping;
     map.wrapT = THREE.RepeatWrapping;
+    map.needsUpdate = true;
 
     const normalMap = this.generateNormalMap(canvas, 1.5);
     normalMap.wrapS = THREE.RepeatWrapping;
     normalMap.wrapT = THREE.RepeatWrapping;
+    normalMap.needsUpdate = true;
 
     return { map, normalMap };
   }
@@ -174,7 +184,10 @@ export class ProceduralTextures {
     const canvas = document.createElement('canvas');
     canvas.width = size;
     canvas.height = size;
-    const ctx = canvas.getContext('2d')!;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    if (!ctx) {
+      throw new Error('Failed to get canvas 2D context');
+    };
 
     // Base metal color with slight gradient
     const gradient = ctx.createLinearGradient(0, 0, size, size);
@@ -260,8 +273,11 @@ export class ProceduralTextures {
     }
 
     const map = new THREE.CanvasTexture(canvas);
+    map.needsUpdate = true;
     const normalMap = this.generateNormalMap(canvas, 2);
+    normalMap.needsUpdate = true;
     const emissiveMap = this.createEmissiveMap(size);
+    emissiveMap.needsUpdate = true;
 
     return { map, normalMap, emissiveMap };
   }
@@ -273,7 +289,10 @@ export class ProceduralTextures {
     const canvas = document.createElement('canvas');
     canvas.width = size;
     canvas.height = size;
-    const ctx = canvas.getContext('2d')!;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      throw new Error('Failed to get canvas 2D context');
+    };
 
     // Black background (no emission by default)
     ctx.fillStyle = '#000000';
@@ -305,9 +324,15 @@ export class ProceduralTextures {
     const canvas = document.createElement('canvas');
     canvas.width = size;
     canvas.height = size;
-    const ctx = canvas.getContext('2d')!;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    if (!ctx) {
+      throw new Error('Failed to get canvas 2D context');
+    }
 
-    const sourceCtx = sourceCanvas.getContext('2d')!;
+    const sourceCtx = sourceCanvas.getContext('2d', { willReadFrequently: true });
+    if (!sourceCtx) {
+      throw new Error('Failed to get source canvas 2D context');
+    }
     const sourceData = sourceCtx.getImageData(0, 0, size, size);
     const normalData = ctx.createImageData(size, size);
 
@@ -358,7 +383,10 @@ export class ProceduralTextures {
     const canvas = document.createElement('canvas');
     canvas.width = size;
     canvas.height = size;
-    const ctx = canvas.getContext('2d')!;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      throw new Error('Failed to get canvas 2D context');
+    }
 
     // Transparent background
     ctx.clearRect(0, 0, size, size);
@@ -430,7 +458,10 @@ export class ProceduralTextures {
     const canvas = document.createElement('canvas');
     canvas.width = size;
     canvas.height = size;
-    const ctx = canvas.getContext('2d')!;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      throw new Error('Failed to get canvas 2D context');
+    }
 
     ctx.clearRect(0, 0, size, size);
 
@@ -462,7 +493,10 @@ export class ProceduralTextures {
     const canvas = document.createElement('canvas');
     canvas.width = size;
     canvas.height = size;
-    const ctx = canvas.getContext('2d')!;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      throw new Error('Failed to get canvas 2D context');
+    }
 
     ctx.clearRect(0, 0, size, size);
 
@@ -494,7 +528,10 @@ export class ProceduralTextures {
     const canvas = document.createElement('canvas');
     canvas.width = size;
     canvas.height = size;
-    const ctx = canvas.getContext('2d')!;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      throw new Error('Failed to get canvas 2D context');
+    }
 
     ctx.clearRect(0, 0, size, size);
 
@@ -528,7 +565,10 @@ export class ProceduralTextures {
     const canvas = document.createElement('canvas');
     canvas.width = size;
     canvas.height = size;
-    const ctx = canvas.getContext('2d')!;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    if (!ctx) {
+      throw new Error('Failed to get canvas 2D context');
+    };
 
     // Base snow color - white with slight blue tint
     ctx.fillStyle = '#e8e8f0';
@@ -578,11 +618,13 @@ export class ProceduralTextures {
     map.wrapS = THREE.RepeatWrapping;
     map.wrapT = THREE.RepeatWrapping;
     map.repeat.set(4, 4);
+    map.needsUpdate = true;
 
     const normalMap = this.generateNormalMap(canvas, 0.5); // Lower strength for smoother snow
     normalMap.wrapS = THREE.RepeatWrapping;
     normalMap.wrapT = THREE.RepeatWrapping;
     normalMap.repeat.set(4, 4);
+    normalMap.needsUpdate = true;
 
     return { map, normalMap };
   }
@@ -597,7 +639,10 @@ export class ProceduralTextures {
     const canvas = document.createElement('canvas');
     canvas.width = size;
     canvas.height = size;
-    const ctx = canvas.getContext('2d')!;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    if (!ctx) {
+      throw new Error('Failed to get canvas 2D context');
+    };
 
     // Base wood color
     ctx.fillStyle = '#8b5a2b';
@@ -688,7 +733,9 @@ export class ProceduralTextures {
     }
 
     const map = new THREE.CanvasTexture(canvas);
+    map.needsUpdate = true;
     const normalMap = this.generateNormalMap(canvas, 1.5);
+    normalMap.needsUpdate = true;
 
     return { map, normalMap };
   }

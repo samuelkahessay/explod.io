@@ -8,6 +8,7 @@ export interface GameState {
   playerHealth: number;
   enemiesKilled: number;
   timeElapsed: number;
+  adsProgress: number;  // 0-1 for crosshair interpolation
 }
 
 // Entity base interface
@@ -81,6 +82,7 @@ export interface InputState {
   right: boolean;
   jump: boolean;
   fire: boolean;
+  aim: boolean;  // Right-click ADS state
 }
 
 // Game events
