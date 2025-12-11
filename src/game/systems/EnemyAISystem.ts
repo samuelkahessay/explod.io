@@ -1,12 +1,16 @@
 import * as THREE from 'three';
 import { Enemy } from '../entities/Enemy';
+import { HumanoidEnemy } from '../entities/HumanoidEnemy';
 import { EnemyProjectile } from '../entities/EnemyProjectile';
 import { Player } from '../entities/Player';
 import { CollisionUtils } from '../utils/CollisionUtils';
 import { GAME_CONFIG } from '@/config/gameConfig';
 
+// Support both Enemy types
+type AnyEnemy = Enemy | HumanoidEnemy;
+
 interface EnemyAIState {
-  enemy: Enemy;
+  enemy: AnyEnemy;
   state: 'idle' | 'chase' | 'attack';
 }
 
@@ -31,7 +35,7 @@ export class EnemyAISystem {
     this.obstacles = obstacles;
   }
 
-  public addEnemy(enemy: Enemy): void {
+  public addEnemy(enemy: AnyEnemy): void {
     this.enemies.set(enemy.id, {
       enemy,
       state: 'idle',
@@ -42,7 +46,7 @@ export class EnemyAISystem {
     this.enemies.delete(enemyId);
   }
 
-  public getEnemies(): Enemy[] {
+  public getEnemies(): AnyEnemy[] {
     return Array.from(this.enemies.values()).map((e) => e.enemy);
   }
 
@@ -63,6 +67,17 @@ export class EnemyAISystem {
       const { enemy } = aiState;
       if (!enemy.isActive) return;
 
+      // Check if enemy can act (not staggered/recovering from knockback)
+      const canAct =
+        'canAct' in enemy ? (enemy as HumanoidEnemy).canAct() : true;
+
+      // If enemy is staggered, skip AI decisions but still update physics
+      if (!canAct) {
+        aiState.state = 'idle'; // Reset AI state while staggered
+        enemy.update(deltaTime);
+        return;
+      }
+
       const distanceToPlayer = enemy.position.distanceTo(player.position);
       const canSeePlayer = this.canSeeTarget(enemy.position, player.position);
 
@@ -80,7 +95,7 @@ export class EnemyAISystem {
         }
       }
 
-      // Attack behavior - fire at player
+      // Attack behavior - fire at player (only if not staggered)
       if (aiState.state === 'attack' && canSeePlayer && enemy.canFire()) {
         this.fireAtPlayer(enemy, player);
       }
@@ -101,7 +116,7 @@ export class EnemyAISystem {
     );
   }
 
-  private fireAtPlayer(enemy: Enemy, player: Player): void {
+  private fireAtPlayer(enemy: AnyEnemy, player: Player): void {
     enemy.fire();
 
     const firePosition = enemy.getFirePosition();

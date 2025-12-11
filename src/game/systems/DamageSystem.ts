@@ -1,8 +1,11 @@
 import * as THREE from 'three';
 import { Enemy } from '../entities/Enemy';
+import { HumanoidEnemy } from '../entities/HumanoidEnemy';
 import { Player } from '../entities/Player';
 import { CollisionUtils } from '../utils/CollisionUtils';
 import { GAME_CONFIG } from '@/config/gameConfig';
+import { LimbType, LimbDamageResult, LimbState } from '../types/LimbTypes';
+import { LIMB_ADJACENCY } from '@/config/limbConfig';
 
 export interface KnockbackData {
   direction: THREE.Vector3;
@@ -11,7 +14,7 @@ export interface KnockbackData {
 
 export interface BlastDamageResult {
   enemiesHit: Array<{
-    enemy: Enemy;
+    enemy: Enemy | HumanoidEnemy;
     damage: number;
     knockback: KnockbackData;
   }>;
@@ -20,12 +23,21 @@ export interface BlastDamageResult {
   playerKnockback: KnockbackData | null;
 }
 
+export interface EnhancedBlastDamageResult extends BlastDamageResult {
+  limbDamage: Array<{
+    enemy: HumanoidEnemy;
+    limbResults: LimbDamageResult[];
+  }>;
+}
+
 // Blast physics configuration
 const BLAST_PHYSICS = {
   KNOCKBACK_FORCE: 18,
   KNOCKBACK_VERTICAL_BIAS: 0.4, // Adds upward component for rocket jumps
   USE_INVERSE_SQUARE: true,
   MIN_DAMAGE_MULTIPLIER: 0.1, // Minimum damage at edge of blast
+  CLOSE_HIT_THRESHOLD: 0.3, // Within 30% of blast radius = close hit (multi-limb damage)
+  ADJACENT_LIMB_DAMAGE_RATIO: 0.4, // Adjacent limbs take 40% of primary damage
 };
 
 export class DamageSystem {
@@ -73,7 +85,42 @@ export class DamageSystem {
   }
 
   /**
-   * Calculate and apply blast radius damage with knockback
+   * Determine which limb is closest to the explosion center
+   */
+  static determineLimbHit(
+    explosionCenter: THREE.Vector3,
+    enemy: HumanoidEnemy
+  ): LimbType {
+    let closestLimb = LimbType.TORSO;
+    let closestDistance = Infinity;
+
+    enemy.limbs.forEach((limbData, limbType) => {
+      if (limbData.state === LimbState.SEVERED) return;
+
+      // Get world position of limb
+      const limbWorldPos = new THREE.Vector3();
+      limbData.mesh.getWorldPosition(limbWorldPos);
+
+      const distance = explosionCenter.distanceTo(limbWorldPos);
+
+      if (distance < closestDistance) {
+        closestDistance = distance;
+        closestLimb = limbType;
+      }
+    });
+
+    return closestLimb;
+  }
+
+  /**
+   * Get adjacent limbs for splash damage
+   */
+  private static getAdjacentLimbs(limbType: LimbType): LimbType[] {
+    return LIMB_ADJACENCY[limbType] || [];
+  }
+
+  /**
+   * Calculate and apply blast radius damage with knockback (legacy - for old Enemy class)
    * Damage falls off using inverse square law
    */
   static calculateBlastDamage(
@@ -131,6 +178,127 @@ export class DamageSystem {
     }
 
     // Check player (self-damage)
+    this.applyPlayerDamage(explosionCenter, blastRadius, baseDamage, player, obstacles, result);
+
+    return result;
+  }
+
+  /**
+   * Calculate blast damage with limb-specific targeting for HumanoidEnemy
+   */
+  static calculateBlastDamageWithLimbs(
+    explosionCenter: THREE.Vector3,
+    blastRadius: number,
+    baseDamage: number,
+    enemies: HumanoidEnemy[],
+    player: Player,
+    obstacles: THREE.Object3D[]
+  ): EnhancedBlastDamageResult {
+    const result: EnhancedBlastDamageResult = {
+      enemiesHit: [],
+      playerHit: false,
+      playerDamage: 0,
+      playerKnockback: null,
+      limbDamage: [],
+    };
+
+    // Check each enemy
+    for (const enemy of enemies) {
+      if (!enemy.isActive) continue;
+
+      const distance = explosionCenter.distanceTo(enemy.position);
+
+      if (distance <= blastRadius * 1.2) {
+        // Check line of sight
+        if (
+          CollisionUtils.hasLineOfSight(
+            explosionCenter,
+            enemy.position,
+            obstacles
+          )
+        ) {
+          const damageMultiplier = this.calculateFalloff(distance, blastRadius);
+          const damage = Math.floor(baseDamage * damageMultiplier);
+
+          // Determine which limb(s) get hit based on proximity
+          const limbResults: LimbDamageResult[] = [];
+
+          // Check if this is a close hit (affects multiple limbs)
+          const isCloseHit = distance < blastRadius * BLAST_PHYSICS.CLOSE_HIT_THRESHOLD;
+
+          if (isCloseHit) {
+            // Very close - multiple limbs take damage
+            const primaryLimb = this.determineLimbHit(explosionCenter, enemy);
+            const adjacentLimbs = this.getAdjacentLimbs(primaryLimb);
+
+            // Primary limb takes full damage
+            limbResults.push(
+              enemy.takeLimbDamage(primaryLimb, damage, explosionCenter)
+            );
+
+            // Adjacent limbs take reduced damage
+            for (const adjLimb of adjacentLimbs) {
+              const adjDamage = Math.floor(damage * BLAST_PHYSICS.ADJACENT_LIMB_DAMAGE_RATIO);
+              if (adjDamage > 0) {
+                limbResults.push(
+                  enemy.takeLimbDamage(adjLimb, adjDamage, explosionCenter)
+                );
+              }
+            }
+          } else {
+            // Further away - single limb damage
+            const hitLimb = this.determineLimbHit(explosionCenter, enemy);
+            limbResults.push(
+              enemy.takeLimbDamage(hitLimb, damage, explosionCenter)
+            );
+          }
+
+          // Calculate and apply knockback
+          const knockback = this.calculateKnockback(
+            explosionCenter,
+            enemy.position,
+            damageMultiplier
+          );
+
+          const knockbackVector = knockback.direction
+            .clone()
+            .multiplyScalar(knockback.force);
+          enemy.applyKnockback(knockbackVector);
+
+          // Calculate total damage for result
+          const totalDamage = limbResults.reduce((sum, r) => sum + r.damage, 0);
+
+          result.enemiesHit.push({
+            enemy,
+            damage: totalDamage,
+            knockback,
+          });
+
+          result.limbDamage.push({
+            enemy,
+            limbResults,
+          });
+        }
+      }
+    }
+
+    // Check player (self-damage)
+    this.applyPlayerDamage(explosionCenter, blastRadius, baseDamage, player, obstacles, result);
+
+    return result;
+  }
+
+  /**
+   * Apply damage to player (shared logic)
+   */
+  private static applyPlayerDamage(
+    explosionCenter: THREE.Vector3,
+    blastRadius: number,
+    baseDamage: number,
+    player: Player,
+    obstacles: THREE.Object3D[],
+    result: BlastDamageResult
+  ): void {
     const playerDistance = explosionCenter.distanceTo(player.position);
 
     if (playerDistance <= blastRadius * 1.2) {
@@ -170,8 +338,6 @@ export class DamageSystem {
         }
       }
     }
-
-    return result;
   }
 
   /**

@@ -3,7 +3,7 @@ import { SceneManager } from './SceneManager';
 import { GameLoop } from './GameLoop';
 import { InputManager } from './InputManager';
 import { Player } from '../entities/Player';
-import { Enemy } from '../entities/Enemy';
+import { HumanoidEnemy } from '../entities/HumanoidEnemy';
 import { Projectile } from '../entities/Projectile';
 import { Explosion } from '../entities/Explosion';
 import { ScorchMark } from '../entities/ScorchMark';
@@ -12,11 +12,14 @@ import { Lighting } from '../world/Lighting';
 import { EnemyAISystem } from '../systems/EnemyAISystem';
 import { DamageSystem } from '../systems/DamageSystem';
 import { ScreenShakeSystem } from '../systems/ScreenShakeSystem';
+import { GibSystem } from '../systems/GibSystem';
+import { BloodSystem } from '../systems/BloodSystem';
 import { ParticleSystem } from '../particles/ParticleSystem';
 import { DebrisSystem } from '../particles/DebrisSystem';
 import { SmokeSystem } from '../particles/SmokeSystem';
 import { DustPuff } from '../particles/DustPuff';
 import { GameState, EnemyConfig } from '../types/GameTypes';
+import { LimbType, LimbState } from '../types/LimbTypes';
 import { GAME_CONFIG } from '@/config/gameConfig';
 
 export class Game {
@@ -25,7 +28,7 @@ export class Game {
   private inputManager: InputManager;
 
   private player: Player;
-  private enemies: Enemy[] = [];
+  private enemies: HumanoidEnemy[] = [];
   private projectiles: Projectile[] = [];
   private explosions: Explosion[] = [];
   private scorchMarks: ScorchMark[] = [];
@@ -34,11 +37,15 @@ export class Game {
   private arena: Arena;
   private aiSystem: EnemyAISystem;
 
-  // New systems
+  // Particle and effect systems
   private screenShake: ScreenShakeSystem;
   private sparkParticles: ParticleSystem;
   private debrisSystem: DebrisSystem;
   private smokeSystem: SmokeSystem;
+
+  // Ragdoll and blood systems
+  private gibSystem: GibSystem;
+  private bloodSystem: BloodSystem;
 
   private state: GameState = {
     isRunning: false,
@@ -83,7 +90,7 @@ export class Game {
     // Create AI system
     this.aiSystem = new EnemyAISystem(this.sceneManager.scene);
 
-    // Create new systems
+    // Create particle/effect systems
     this.screenShake = new ScreenShakeSystem(this.sceneManager.camera);
     this.sparkParticles = new ParticleSystem(this.sceneManager.scene, 500, {
       size: 0.15,
@@ -91,6 +98,10 @@ export class Game {
     });
     this.debrisSystem = new DebrisSystem(this.sceneManager.scene, 100);
     this.smokeSystem = new SmokeSystem(this.sceneManager.scene, 200);
+
+    // Create ragdoll and blood systems
+    this.bloodSystem = new BloodSystem(this.sceneManager.scene);
+    this.gibSystem = new GibSystem(this.sceneManager.scene, this.bloodSystem);
   }
 
   public init(): void {
@@ -178,6 +189,10 @@ export class Game {
     this.sparkParticles.update(deltaTime);
     this.debrisSystem.update(deltaTime);
     this.smokeSystem.update(deltaTime);
+
+    // Update ragdoll and blood systems
+    this.gibSystem.update(deltaTime);
+    this.bloodSystem.update(deltaTime);
 
     // Update scorch marks
     this.updateScorchMarks(deltaTime);
@@ -325,8 +340,8 @@ export class Game {
     // Trigger bloom spike
     this.sceneManager.triggerExplosionBloom();
 
-    // Apply damage
-    const damageResult = DamageSystem.calculateBlastDamage(
+    // Apply damage with limb-specific targeting
+    const damageResult = DamageSystem.calculateBlastDamageWithLimbs(
       position,
       config.blastRadius,
       config.damage,
@@ -335,12 +350,22 @@ export class Game {
       this.sceneManager.getCollidableObjects()
     );
 
-    // Handle enemy deaths
+    // Handle enemy deaths and limb damage
     damageResult.enemiesHit.forEach(({ enemy }) => {
       if (enemy.isDead()) {
         this.state.score += GAME_CONFIG.SCORING.ENEMY_KILL;
         this.state.enemiesKilled++;
       }
+    });
+
+    // Check for severed limbs and emit additional blood
+    damageResult.limbDamage.forEach(({ limbResults }) => {
+      limbResults.forEach((result) => {
+        if (result.severed) {
+          // Extra score for dismemberment
+          this.state.score += 25;
+        }
+      });
     });
   }
 
@@ -460,6 +485,27 @@ export class Game {
     for (let i = this.enemies.length - 1; i >= 0; i--) {
       const enemy = this.enemies[i];
       if (enemy.isDead()) {
+        // Check if death was from explosion - trigger full gib explosion
+        if (enemy.wasKilledByExplosion) {
+          // Convert limbs map to the format GibSystem expects
+          const limbsForGib = new Map<LimbType, { mesh: THREE.Mesh; state: string }>();
+          enemy.limbs.forEach((limb, limbType) => {
+            limbsForGib.set(limbType, {
+              mesh: limb.mesh,
+              state: limb.state === LimbState.ATTACHED ? 'attached' : 'severed',
+            });
+          });
+
+          this.gibSystem.emitDeathGibs(
+            limbsForGib,
+            enemy.position,
+            enemy.lastExplosionCenter
+          );
+
+          // Extra blood spray at death location
+          this.bloodSystem.emitSpray(enemy.position.clone().add(new THREE.Vector3(0, 1, 0)), 50);
+        }
+
         this.aiSystem.removeEnemy(enemy.id);
         enemy.destroy();
         this.enemies.splice(i, 1);
@@ -503,7 +549,16 @@ export class Game {
     }
 
     const position = new THREE.Vector3(x, 0, z);
-    const enemy = new Enemy(this.sceneManager.scene, position, config);
+    const enemy = new HumanoidEnemy(this.sceneManager.scene, position, config);
+
+    // Set up callbacks for limb events
+    enemy.onLimbSevered = (limbType, worldPos, explosionCenter, mesh) => {
+      this.gibSystem.emitLimbGib(mesh, worldPos, explosionCenter, limbType);
+    };
+
+    enemy.onBloodSpray = (position, count) => {
+      this.bloodSystem.emitSpray(position, count);
+    };
 
     this.enemies.push(enemy);
     this.aiSystem.addEnemy(enemy);
@@ -555,6 +610,12 @@ export class Game {
     this.aiSystem = new EnemyAISystem(this.sceneManager.scene);
     this.aiSystem.setObstacles(this.sceneManager.getCollidableObjects());
 
+    // Recreate gib and blood systems
+    this.bloodSystem.destroy();
+    this.gibSystem.destroy();
+    this.bloodSystem = new BloodSystem(this.sceneManager.scene);
+    this.gibSystem = new GibSystem(this.sceneManager.scene, this.bloodSystem);
+
     // Reset player
     this.player.reset();
 
@@ -590,6 +651,10 @@ export class Game {
     this.sparkParticles.dispose();
     this.debrisSystem.dispose();
     this.smokeSystem.dispose();
+
+    // Clean up ragdoll and blood systems
+    this.gibSystem.destroy();
+    this.bloodSystem.destroy();
 
     this.aiSystem.dispose();
     this.sceneManager.dispose();
