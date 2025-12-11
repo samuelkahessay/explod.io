@@ -17,10 +17,23 @@ export class SmokeSystem {
   private maxParticles: number;
   private smokeTexture: THREE.Texture;
 
+  // Base material to clone from (avoids recreating material properties each time)
+  private baseMaterial: THREE.SpriteMaterial;
+
   constructor(scene: THREE.Scene, maxParticles: number = 200) {
     this.scene = scene;
     this.maxParticles = maxParticles;
     this.smokeTexture = ProceduralTextures.createSmokeTexture();
+
+    // Create base material with common settings
+    this.baseMaterial = new THREE.SpriteMaterial({
+      map: this.smokeTexture,
+      transparent: true,
+      opacity: 0.5,
+      depthWrite: false,
+      blending: THREE.NormalBlending,
+      color: new THREE.Color(0.4, 0.4, 0.4),
+    });
   }
 
   public emit(
@@ -36,14 +49,11 @@ export class SmokeSystem {
     for (let i = 0; i < count; i++) {
       if (this.particles.length >= this.maxParticles) return;
 
-      const material = new THREE.SpriteMaterial({
-        map: this.smokeTexture,
-        transparent: true,
-        opacity: 0.5,
-        depthWrite: false,
-        blending: THREE.NormalBlending,
-        color: options.color || new THREE.Color(0.4, 0.4, 0.4),
-      });
+      // Clone from base material (faster than creating new)
+      const material = this.baseMaterial.clone();
+      if (options.color) {
+        material.color = options.color;
+      }
 
       const sprite = new THREE.Sprite(material);
       sprite.position.copy(position);
@@ -128,6 +138,7 @@ export class SmokeSystem {
 
   public dispose(): void {
     this.clear();
+    this.baseMaterial.dispose();
     this.smokeTexture.dispose();
   }
 }

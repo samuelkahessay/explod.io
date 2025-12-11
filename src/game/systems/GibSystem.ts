@@ -24,6 +24,9 @@ export class GibSystem {
   // Shared geometries for meat chunks (performance optimization)
   private chunkGeometries: THREE.BufferGeometry[] = [];
 
+  // Shared materials for meat chunks (reduces material instances)
+  private chunkMaterials: THREE.MeshStandardMaterial[] = [];
+
   constructor(scene: THREE.Scene, bloodSystem?: BloodSystem) {
     this.scene = scene;
     this.maxGibs = LIMB_PERFORMANCE_LIMITS.maxGibs;
@@ -41,6 +44,21 @@ export class GibSystem {
       new THREE.BoxGeometry(0.08, 0.15, 0.08),
       new THREE.SphereGeometry(0.08, 4, 4),
     ];
+
+    // Create shared materials with color variations (pre-allocated for performance)
+    const bodyColor = new THREE.Color(LIMB_COLORS.body);
+    const bloodColor = new THREE.Color(LIMB_COLORS.blood);
+    for (let i = 0; i < 8; i++) {
+      const lerp = i / 7; // 0 to 1 in 8 steps
+      const color = bodyColor.clone().lerp(bloodColor, lerp);
+      this.chunkMaterials.push(
+        new THREE.MeshStandardMaterial({
+          color,
+          roughness: 0.9,
+          metalness: 0.1,
+        })
+      );
+    }
   }
 
   public setBloodSystem(bloodSystem: BloodSystem): void {
@@ -175,18 +193,9 @@ export class GibSystem {
       const geometryIndex = Math.floor(Math.random() * this.chunkGeometries.length);
       const geometry = this.chunkGeometries[geometryIndex];
 
-      // Vary colors between body red and blood red
-      const colorLerp = Math.random();
-      const color = new THREE.Color(LIMB_COLORS.body).lerp(
-        new THREE.Color(LIMB_COLORS.blood),
-        colorLerp
-      );
-
-      const material = new THREE.MeshStandardMaterial({
-        color,
-        roughness: 0.9,
-        metalness: 0.1,
-      });
+      // Use pre-allocated shared material (randomly selected)
+      const materialIndex = Math.floor(Math.random() * this.chunkMaterials.length);
+      const material = this.chunkMaterials[materialIndex];
 
       const chunk = new THREE.Mesh(geometry.clone(), material);
 
@@ -300,22 +309,30 @@ export class GibSystem {
       // Fade out in last second
       if (gib.life < 1) {
         const opacity = Math.max(0, gib.life);
-        const material = gib.mesh.material as THREE.MeshStandardMaterial;
-        if (material) {
-          material.opacity = opacity;
-          material.transparent = true;
-        }
 
-        // Also fade any children (stump caps)
-        gib.mesh.traverse((child) => {
-          if (child instanceof THREE.Mesh && child !== gib.mesh) {
-            const childMat = child.material as THREE.MeshBasicMaterial;
-            if (childMat) {
-              childMat.opacity = opacity;
-              childMat.transparent = true;
-            }
+        if (gib.isLimb) {
+          // Limbs use their own cloned materials, so can fade opacity
+          const material = gib.mesh.material as THREE.MeshStandardMaterial;
+          if (material) {
+            material.opacity = opacity;
+            material.transparent = true;
           }
-        });
+
+          // Also fade any children (stump caps)
+          gib.mesh.traverse((child) => {
+            if (child instanceof THREE.Mesh && child !== gib.mesh) {
+              const childMat = child.material as THREE.MeshBasicMaterial;
+              if (childMat) {
+                childMat.opacity = opacity;
+                childMat.transparent = true;
+              }
+            }
+          });
+        } else {
+          // Meat chunks use shared materials - scale down instead of fading
+          const scale = opacity;
+          gib.mesh.scale.setScalar(scale);
+        }
       }
 
       if (gib.life <= 0) {
@@ -327,11 +344,13 @@ export class GibSystem {
   private removeGib(index: number): void {
     const gib = this.gibs[index];
 
-    // Dispose of resources
+    // Dispose of resources - but not shared materials for meat chunks
     gib.mesh.traverse((child) => {
       if (child instanceof THREE.Mesh) {
         if (child.geometry) child.geometry.dispose();
-        if (child.material) {
+        // Only dispose materials for limbs (their own cloned materials)
+        // Meat chunks use shared materials that shouldn't be disposed
+        if (gib.isLimb && child.material) {
           if (Array.isArray(child.material)) {
             child.material.forEach((m) => m.dispose());
           } else {
@@ -357,5 +376,8 @@ export class GibSystem {
 
     // Dispose shared geometries
     this.chunkGeometries.forEach((geo) => geo.dispose());
+
+    // Dispose shared materials
+    this.chunkMaterials.forEach((mat) => mat.dispose());
   }
 }

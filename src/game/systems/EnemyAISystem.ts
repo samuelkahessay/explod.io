@@ -5,6 +5,7 @@ import { EnemyProjectile } from '../entities/EnemyProjectile';
 import { Player } from '../entities/Player';
 import { CollisionUtils } from '../utils/CollisionUtils';
 import { GAME_CONFIG } from '@/config/gameConfig';
+import { ThemeType } from '@/config/themeConfig';
 
 // Support both Enemy types
 type AnyEnemy = Enemy | HumanoidEnemy;
@@ -16,6 +17,7 @@ interface EnemyAIState {
 
 export class EnemyAISystem {
   private scene: THREE.Scene;
+  private theme: ThemeType;
   private enemies: Map<string, EnemyAIState> = new Map();
   private obstacles: THREE.Object3D[] = [];
   private enemyProjectiles: EnemyProjectile[] = [];
@@ -25,10 +27,16 @@ export class EnemyAISystem {
   private readonly AI_UPDATE_INTERVAL = 0.1; // seconds
   private updateTimer: number = 0;
 
+  // Visibility cache for throttling line-of-sight checks
+  private visibilityCache: Map<string, { visible: boolean; timestamp: number }> = new Map();
+  private readonly VISIBILITY_CACHE_TTL = 0.3; // 300ms cache
+  private currentTime: number = 0;
+
   public onEnemyProjectileFired: ((projectile: EnemyProjectile) => void) | null = null;
 
-  constructor(scene: THREE.Scene) {
+  constructor(scene: THREE.Scene, theme: ThemeType = 'DEFAULT') {
     this.scene = scene;
+    this.theme = theme;
   }
 
   public setObstacles(obstacles: THREE.Object3D[]): void {
@@ -40,10 +48,15 @@ export class EnemyAISystem {
       enemy,
       state: 'idle',
     });
+    // Set collidables for obstacle avoidance
+    if ('setCollidables' in enemy) {
+      (enemy as HumanoidEnemy).setCollidables(this.obstacles);
+    }
   }
 
   public removeEnemy(enemyId: string): void {
     this.enemies.delete(enemyId);
+    this.visibilityCache.delete(enemyId);
   }
 
   public getEnemies(): AnyEnemy[] {
@@ -56,6 +69,7 @@ export class EnemyAISystem {
 
   public update(deltaTime: number, player: Player): void {
     this.updateTimer += deltaTime;
+    this.currentTime += deltaTime;
 
     const shouldUpdateAI = this.updateTimer >= this.AI_UPDATE_INTERVAL;
     if (shouldUpdateAI) {
@@ -79,7 +93,7 @@ export class EnemyAISystem {
       }
 
       const distanceToPlayer = enemy.position.distanceTo(player.position);
-      const canSeePlayer = this.canSeeTarget(enemy.position, player.position);
+      const canSeePlayer = this.canSeeTarget(enemy.position, player.position, enemy.id);
 
       // AI state machine (only update decisions periodically)
       if (shouldUpdateAI) {
@@ -108,12 +122,23 @@ export class EnemyAISystem {
     this.updateProjectiles(deltaTime, player);
   }
 
-  private canSeeTarget(from: THREE.Vector3, to: THREE.Vector3): boolean {
-    return CollisionUtils.hasLineOfSight(
+  private canSeeTarget(from: THREE.Vector3, to: THREE.Vector3, enemyId: string): boolean {
+    // Check visibility cache first
+    const cached = this.visibilityCache.get(enemyId);
+    if (cached && (this.currentTime - cached.timestamp) < this.VISIBILITY_CACHE_TTL) {
+      return cached.visible;
+    }
+
+    // Cache miss or stale - perform raycast
+    const visible = CollisionUtils.hasLineOfSight(
       from.clone().setY(1),
       to.clone().setY(1),
       this.obstacles
     );
+
+    // Update cache
+    this.visibilityCache.set(enemyId, { visible, timestamp: this.currentTime });
+    return visible;
   }
 
   private fireAtPlayer(enemy: AnyEnemy, player: Player): void {
@@ -127,7 +152,8 @@ export class EnemyAISystem {
       firePosition,
       fireDirection,
       this.obstacles,
-      player.position
+      player.position,
+      this.theme
     );
 
     this.enemyProjectiles.push(projectile);
@@ -167,5 +193,7 @@ export class EnemyAISystem {
   public dispose(): void {
     this.clearProjectiles();
     this.enemies.clear();
+    this.visibilityCache.clear();
+    this.currentTime = 0;
   }
 }

@@ -17,10 +17,14 @@ import { BloodSystem } from '../systems/BloodSystem';
 import { ParticleSystem } from '../particles/ParticleSystem';
 import { DebrisSystem } from '../particles/DebrisSystem';
 import { SmokeSystem } from '../particles/SmokeSystem';
+import { SnowSystem } from '../particles/SnowSystem';
 import { DustPuff } from '../particles/DustPuff';
 import { GameState, EnemyConfig } from '../types/GameTypes';
 import { LimbType, LimbState } from '../types/LimbTypes';
 import { GAME_CONFIG } from '@/config/gameConfig';
+import { ThemeType, getThemeColors, getRandomChristmasEnemyType, CHRISTMAS_ENEMIES, ChristmasEnemyType } from '@/config/themeConfig';
+import { ObjectPool } from '../utils/ObjectPool';
+import { SpatialHash } from '../utils/SpatialHash';
 
 export class Game {
   private sceneManager: SceneManager;
@@ -29,10 +33,18 @@ export class Game {
 
   private player: Player;
   private enemies: HumanoidEnemy[] = [];
-  private projectiles: Projectile[] = [];
-  private explosions: Explosion[] = [];
   private scorchMarks: ScorchMark[] = [];
   private dustPuffs: DustPuff[] = [];
+
+  // Object pools for frequently created/destroyed entities
+  private projectilePool: ObjectPool<Projectile>;
+  private explosionPool: ObjectPool<Explosion>;
+
+  // Spatial hash for efficient collision queries
+  private spatialHash: SpatialHash;
+
+  // Floor mesh reference (always included in projectile collisions since it covers entire arena)
+  private floorMesh: THREE.Object3D | null = null;
 
   private arena: Arena;
   private aiSystem: EnemyAISystem;
@@ -46,6 +58,12 @@ export class Game {
   // Ragdoll and blood systems
   private gibSystem: GibSystem;
   private bloodSystem: BloodSystem;
+
+  // Snow system (Christmas mode only)
+  private snowSystem: SnowSystem | null = null;
+
+  // Theme
+  private theme: ThemeType;
 
   private state: GameState = {
     isRunning: false,
@@ -69,26 +87,30 @@ export class Game {
   // Callbacks
   public onStateUpdate: ((state: GameState) => void) | null = null;
 
-  constructor(container: HTMLElement) {
-    this.sceneManager = new SceneManager(container);
+  constructor(container: HTMLElement, theme: ThemeType = 'DEFAULT') {
+    this.theme = theme;
+    const themeColors = getThemeColors(theme);
+
+    this.sceneManager = new SceneManager(container, theme);
     this.gameLoop = new GameLoop();
     this.inputManager = new InputManager();
 
-    // Create player
+    // Create player with theme
     this.player = new Player(
       this.sceneManager.scene,
       this.sceneManager.camera,
-      container
+      container,
+      theme
     );
 
-    // Create arena
-    this.arena = new Arena(this.sceneManager.scene);
+    // Create arena with theme
+    this.arena = new Arena(this.sceneManager.scene, theme);
 
     // Setup lighting
     new Lighting(this.sceneManager.scene);
 
-    // Create AI system
-    this.aiSystem = new EnemyAISystem(this.sceneManager.scene);
+    // Create AI system with theme
+    this.aiSystem = new EnemyAISystem(this.sceneManager.scene, theme);
 
     // Create particle/effect systems
     this.screenShake = new ScreenShakeSystem(this.sceneManager.camera);
@@ -102,6 +124,30 @@ export class Game {
     // Create ragdoll and blood systems
     this.bloodSystem = new BloodSystem(this.sceneManager.scene);
     this.gibSystem = new GibSystem(this.sceneManager.scene, this.bloodSystem);
+
+    // Initialize object pools with theme
+    this.projectilePool = new ObjectPool<Projectile>(
+      () => new Projectile(this.sceneManager.scene, this.theme),
+      (p) => p.deactivate(),
+      20, // Pre-allocate 20 projectiles
+      50  // Max 50 pooled
+    );
+
+    this.explosionPool = new ObjectPool<Explosion>(
+      () => new Explosion(this.sceneManager.scene, this.theme),
+      (e) => e.deactivate(),
+      10, // Pre-allocate 10 explosions
+      20  // Max 20 pooled
+    );
+
+    // Initialize snow system for Christmas mode
+    if (theme === 'CHRISTMAS') {
+      this.snowSystem = new SnowSystem(this.sceneManager.scene);
+    }
+
+    // Initialize spatial hash for collision optimization
+    // Cell size of 5 units works well for a 40x40 arena
+    this.spatialHash = new SpatialHash(5);
   }
 
   public init(): void {
@@ -113,9 +159,21 @@ export class Game {
     this.player.setCollidables(collidables);
     this.aiSystem.setObstacles(collidables);
 
-    // Handle projectile fired
-    this.player.weapon.onProjectileFired = (projectile) => {
-      this.projectiles.push(projectile);
+    // Find and store floor reference (floor covers entire arena, can't use spatial hash)
+    this.floorMesh = collidables.find(obj => obj.userData.type === 'floor') || null;
+
+    // Populate spatial hash with static arena collidables (except floor which is global)
+    for (const obj of collidables) {
+      if (obj.userData.type !== 'floor') {
+        this.spatialHash.insert(obj, 2); // Use radius of 2 for static objects
+      }
+    }
+
+    // Set up projectile pool acquisition callback
+    this.player.weapon.acquireProjectile = (scene, position, direction, config, collidables) => {
+      const projectile = this.projectilePool.acquire();
+      projectile.reset(position, direction, config, collidables);
+      return projectile;
     };
 
     // Setup game loop
@@ -190,6 +248,11 @@ export class Game {
     this.debrisSystem.update(deltaTime);
     this.smokeSystem.update(deltaTime);
 
+    // Update snow system (Christmas mode)
+    if (this.snowSystem) {
+      this.snowSystem.update(deltaTime, this.player.position);
+    }
+
     // Update ragdoll and blood systems
     this.gibSystem.update(deltaTime);
     this.bloodSystem.update(deltaTime);
@@ -229,14 +292,28 @@ export class Game {
   }
 
   private updateProjectiles(deltaTime: number): void {
-    // Get all collidable objects including enemies
-    const collidables = [
-      ...this.sceneManager.getCollidableObjects(),
-      ...this.enemies.filter((e) => e.isActive).map((e) => e.mesh),
-    ];
+    // Force matrix world update for all enemies before collision checks
+    // This ensures raycasting uses current world positions, not stale matrices
+    for (const enemy of this.enemies) {
+      if (enemy.isActive) {
+        enemy.mesh.updateMatrixWorld(true);
+      }
+    }
 
-    for (let i = this.projectiles.length - 1; i >= 0; i--) {
-      const projectile = this.projectiles[i];
+    // Get active projectiles from pool and collect ones to release
+    const activeProjectiles = this.projectilePool.getActiveObjects();
+    const toRelease: Projectile[] = [];
+
+    for (const projectile of activeProjectiles) {
+      // Use spatial hash to get nearby collidables (much faster than checking all)
+      const nearbyStatic = this.spatialHash.getNearby(projectile.position, 5);
+      const nearbyEnemies = this.enemies
+        .filter((e) => e.isActive && e.position.distanceTo(projectile.position) < 10)
+        .map((e) => e.mesh);
+      // Always include floor (it covers entire arena, not in spatial hash)
+      const collidables = this.floorMesh
+        ? [...nearbyStatic, ...nearbyEnemies, this.floorMesh]
+        : [...nearbyStatic, ...nearbyEnemies];
       projectile.setCollidables(collidables);
 
       const result = projectile.update(deltaTime);
@@ -254,10 +331,14 @@ export class Game {
           hitEnemy ? undefined : result.object
         );
 
-        // Remove projectile
-        projectile.destroy();
-        this.projectiles.splice(i, 1);
+        // Mark for release to pool
+        toRelease.push(projectile);
       }
+    }
+
+    // Release finished projectiles back to pool
+    for (const projectile of toRelease) {
+      this.projectilePool.release(projectile);
     }
   }
 
@@ -267,19 +348,13 @@ export class Game {
     normal?: THREE.Vector3,
     hitObject?: THREE.Object3D
   ): void {
-    // Visual explosion with particle systems
-    const explosion = new Explosion(
-      this.sceneManager.scene,
-      position,
-      config.blastRadius,
-      2, // duration
-      {
-        sparks: this.sparkParticles,
-        debris: this.debrisSystem,
-        smoke: this.smokeSystem,
-      }
-    );
-    this.explosions.push(explosion);
+    // Visual explosion with particle systems (from pool)
+    const explosion = this.explosionPool.acquire();
+    explosion.reset(position, config.blastRadius, 2, {
+      sparks: this.sparkParticles,
+      debris: this.debrisSystem,
+      smoke: this.smokeSystem,
+    });
 
     // Create scorch mark on the hit surface
     if (normal && hitObject) {
@@ -370,13 +445,20 @@ export class Game {
   }
 
   private updateExplosions(deltaTime: number): void {
-    for (let i = this.explosions.length - 1; i >= 0; i--) {
-      const explosion = this.explosions[i];
+    const activeExplosions = this.explosionPool.getActiveObjects();
+    const toRelease: Explosion[] = [];
+
+    for (const explosion of activeExplosions) {
       explosion.update(deltaTime);
 
       if (!explosion.isActive) {
-        this.explosions.splice(i, 1);
+        toRelease.push(explosion);
       }
+    }
+
+    // Release finished explosions back to pool
+    for (const explosion of toRelease) {
+      this.explosionPool.release(explosion);
     }
   }
 
@@ -513,19 +595,74 @@ export class Game {
     }
   }
 
+  // Spawn distance constraints
+  private readonly MIN_SPAWN_DISTANCE_FROM_PLAYER = 10;
+  private readonly MIN_SPAWN_DISTANCE_FROM_ENEMIES = 3;
+  private readonly MAX_SPAWN_ATTEMPTS = 20;
+
   private spawnEnemy(): void {
-    const config: EnemyConfig = {
-      health: GAME_CONFIG.ENEMY.HEALTH,
-      speed: GAME_CONFIG.ENEMY.SPEED,
-      damage: GAME_CONFIG.ENEMY.DAMAGE,
-      attackRange: GAME_CONFIG.ENEMY.ATTACK_RANGE,
-      detectionRange: GAME_CONFIG.ENEMY.DETECTION_RANGE,
-      fireRate: GAME_CONFIG.ENEMY.FIRE_RATE,
+    // Determine enemy type and config based on theme
+    let christmasEnemyType: ChristmasEnemyType | null = null;
+    let config: EnemyConfig;
+
+    if (this.theme === 'CHRISTMAS') {
+      christmasEnemyType = getRandomChristmasEnemyType();
+      const enemyConfig = CHRISTMAS_ENEMIES[christmasEnemyType];
+
+      config = {
+        health: GAME_CONFIG.ENEMY.HEALTH * enemyConfig.healthMultiplier,
+        speed: GAME_CONFIG.ENEMY.SPEED * enemyConfig.speedMultiplier,
+        damage: GAME_CONFIG.ENEMY.DAMAGE,
+        attackRange: GAME_CONFIG.ENEMY.ATTACK_RANGE,
+        detectionRange: GAME_CONFIG.ENEMY.DETECTION_RANGE,
+        fireRate: GAME_CONFIG.ENEMY.FIRE_RATE,
+      };
+    } else {
+      config = {
+        health: GAME_CONFIG.ENEMY.HEALTH,
+        speed: GAME_CONFIG.ENEMY.SPEED,
+        damage: GAME_CONFIG.ENEMY.DAMAGE,
+        attackRange: GAME_CONFIG.ENEMY.ATTACK_RANGE,
+        detectionRange: GAME_CONFIG.ENEMY.DETECTION_RANGE,
+        fireRate: GAME_CONFIG.ENEMY.FIRE_RATE,
+      };
+    }
+
+    const arenaSize = GAME_CONFIG.ARENA.SIZE;
+    let position: THREE.Vector3 | null = null;
+
+    // Try to find a valid spawn position
+    for (let attempt = 0; attempt < this.MAX_SPAWN_ATTEMPTS; attempt++) {
+      const candidatePos = this.getRandomEdgePosition(arenaSize);
+
+      if (this.isValidSpawnPosition(candidatePos)) {
+        position = candidatePos;
+        break;
+      }
+    }
+
+    // If no valid position found after max attempts, skip spawning this enemy
+    if (!position) {
+      return;
+    }
+
+    const enemy = new HumanoidEnemy(this.sceneManager.scene, position, config, this.theme, christmasEnemyType);
+
+    // Set up callbacks for limb events
+    enemy.onLimbSevered = (limbType, worldPos, explosionCenter, mesh) => {
+      this.gibSystem.emitLimbGib(mesh, worldPos, explosionCenter, limbType);
     };
 
-    // Random position on arena edges
+    enemy.onBloodSpray = (position, count) => {
+      this.bloodSystem.emitSpray(position, count);
+    };
+
+    this.enemies.push(enemy);
+    this.aiSystem.addEnemy(enemy);
+  }
+
+  private getRandomEdgePosition(arenaSize: number): THREE.Vector3 {
     const side = Math.floor(Math.random() * 4);
-    const arenaSize = GAME_CONFIG.ARENA.SIZE;
     let x = 0,
       z = 0;
 
@@ -548,20 +685,55 @@ export class Game {
         break;
     }
 
-    const position = new THREE.Vector3(x, 0, z);
-    const enemy = new HumanoidEnemy(this.sceneManager.scene, position, config);
+    return new THREE.Vector3(x, 0, z);
+  }
 
-    // Set up callbacks for limb events
-    enemy.onLimbSevered = (limbType, worldPos, explosionCenter, mesh) => {
-      this.gibSystem.emitLimbGib(mesh, worldPos, explosionCenter, limbType);
-    };
+  private isValidSpawnPosition(position: THREE.Vector3): boolean {
+    // Check distance from player (only X and Z, ignore Y)
+    const playerDistance = Math.sqrt(
+      Math.pow(position.x - this.player.position.x, 2) +
+      Math.pow(position.z - this.player.position.z, 2)
+    );
 
-    enemy.onBloodSpray = (position, count) => {
-      this.bloodSystem.emitSpray(position, count);
-    };
+    if (playerDistance < this.MIN_SPAWN_DISTANCE_FROM_PLAYER) {
+      return false;
+    }
 
-    this.enemies.push(enemy);
-    this.aiSystem.addEnemy(enemy);
+    // Check distance from all existing enemies
+    for (const enemy of this.enemies) {
+      if (!enemy.isActive) continue;
+
+      const enemyDistance = Math.sqrt(
+        Math.pow(position.x - enemy.position.x, 2) +
+        Math.pow(position.z - enemy.position.z, 2)
+      );
+
+      if (enemyDistance < this.MIN_SPAWN_DISTANCE_FROM_ENEMIES) {
+        return false;
+      }
+    }
+
+    // Check if position overlaps with any obstacle
+    const collidables = this.sceneManager.getCollidableObjects();
+    const enemyRadius = 0.5;
+    for (const obj of collidables) {
+      if (obj.userData?.type !== 'obstacle') continue;
+
+      const box = new THREE.Box3().setFromObject(obj);
+      // Expand box by enemy radius to prevent spawning too close
+      box.expandByScalar(enemyRadius);
+
+      if (
+        position.x >= box.min.x &&
+        position.x <= box.max.x &&
+        position.z >= box.min.z &&
+        position.z <= box.max.z
+      ) {
+        return false;
+      }
+    }
+
+    return true;
   }
 
   private gameOver(): void {
@@ -584,13 +756,9 @@ export class Game {
     this.enemies.forEach((e) => e.destroy());
     this.enemies = [];
 
-    // Clear projectiles
-    this.projectiles.forEach((p) => p.destroy());
-    this.projectiles = [];
-
-    // Clear explosions
-    this.explosions.forEach((e) => e.destroy());
-    this.explosions = [];
+    // Release all pooled objects back to pools
+    this.projectilePool.releaseAll();
+    this.explosionPool.releaseAll();
 
     // Clear scorch marks
     this.scorchMarks.forEach((s) => s.dispose());
@@ -640,9 +808,11 @@ export class Game {
   public dispose(): void {
     this.stop();
 
-    // Clean up all entities
-    this.projectiles.forEach((p) => p.destroy());
-    this.explosions.forEach((e) => e.destroy());
+    // Clean up pooled entities
+    this.projectilePool.releaseAll();
+    this.explosionPool.releaseAll();
+
+    // Clean up non-pooled entities
     this.enemies.forEach((e) => e.destroy());
     this.scorchMarks.forEach((s) => s.dispose());
     this.dustPuffs.forEach((d) => d.dispose());
@@ -651,6 +821,11 @@ export class Game {
     this.sparkParticles.dispose();
     this.debrisSystem.dispose();
     this.smokeSystem.dispose();
+
+    // Clean up snow system
+    if (this.snowSystem) {
+      this.snowSystem.dispose();
+    }
 
     // Clean up ragdoll and blood systems
     this.gibSystem.destroy();

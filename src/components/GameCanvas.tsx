@@ -4,6 +4,8 @@ import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { Game } from '../game/core/Game';
 import { GameState } from '../game/types/GameTypes';
 import { GAME_CONFIG } from '@/config/gameConfig';
+import { ThemeType } from '@/config/themeConfig';
+import { getTheme } from '@/utils/settings';
 import HUD from './HUD';
 
 interface GameCanvasProps {
@@ -26,6 +28,14 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onGameOver }) => {
 
   const [isLocked, setIsLocked] = useState(false);
   const [showGameOver, setShowGameOver] = useState(false);
+  const [theme, setTheme] = useState<ThemeType>('DEFAULT');
+
+  // Load theme on mount
+  useEffect(() => {
+    setTheme(getTheme());
+  }, []);
+
+  const isChristmas = theme === 'CHRISTMAS';
 
   // Keep ref in sync with state
   useEffect(() => {
@@ -36,8 +46,8 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onGameOver }) => {
   useEffect(() => {
     if (!containerRef.current) return;
 
-    // Create game instance
-    const game = new Game(containerRef.current);
+    // Create game instance with theme
+    const game = new Game(containerRef.current, theme);
     gameRef.current = game;
 
     // Subscribe to state updates
@@ -70,7 +80,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onGameOver }) => {
       document.removeEventListener('pointerlockchange', handleLockChange);
       game.dispose();
     };
-  }, [onGameOver]);
+  }, [onGameOver, theme]);
 
   // Handle click to start/lock
   const handleClick = useCallback(() => {
@@ -121,6 +131,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onGameOver }) => {
           maxHealth={GAME_CONFIG.PLAYER.HEALTH}
           score={gameState.score}
           enemiesKilled={gameState.enemiesKilled}
+          theme={theme}
         />
       )}
 
@@ -141,13 +152,21 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onGameOver }) => {
       {!isLocked && !showGameOver && (
         <div className="absolute inset-0 flex items-center justify-center bg-black/70">
           <div className="text-center">
-            <h1 className="text-6xl font-bold text-white mb-4">EXPLOSION FPS</h1>
-            <p className="text-2xl text-gray-300 mb-8">Rocket Launcher Arena</p>
+            <h1 className="text-6xl font-bold text-white mb-4">
+              {isChristmas ? "SANTA'S DEFENSE" : 'EXPLOSION FPS'}
+            </h1>
+            <p className="text-2xl text-gray-300 mb-8">
+              {isChristmas ? 'Defend the North Pole!' : 'Rocket Launcher Arena'}
+            </p>
             <button
               onClick={handleClick}
-              className="px-8 py-4 bg-red-600 hover:bg-red-700 text-white text-xl font-bold rounded-lg transition-colors"
+              className={`px-8 py-4 text-white text-xl font-bold rounded-lg transition-colors ${
+                isChristmas
+                  ? 'bg-green-600 hover:bg-green-700'
+                  : 'bg-red-600 hover:bg-red-700'
+              }`}
             >
-              CLICK TO PLAY
+              {isChristmas ? 'SAVE CHRISTMAS' : 'CLICK TO PLAY'}
             </button>
             <div className="mt-8 text-gray-400">
               <p className="mb-2">Controls:</p>
@@ -162,19 +181,27 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onGameOver }) => {
       {showGameOver && (
         <div className="absolute inset-0 flex items-center justify-center bg-black/80">
           <div className="text-center">
-            <h1 className="text-6xl font-bold text-red-500 mb-4">GAME OVER</h1>
+            <h1 className="text-6xl font-bold text-red-500 mb-4">
+              {isChristmas ? 'CHRISTMAS LOST' : 'GAME OVER'}
+            </h1>
             <div className="text-white mb-8">
               <p className="text-3xl mb-2">Score: {gameState.score.toLocaleString()}</p>
-              <p className="text-xl text-gray-400">Enemies Killed: {gameState.enemiesKilled}</p>
+              <p className="text-xl text-gray-400">
+                {isChristmas ? 'Invaders Defeated' : 'Enemies Killed'}: {gameState.enemiesKilled}
+              </p>
               <p className="text-xl text-gray-400">
                 Time Survived: {Math.floor(gameState.timeElapsed)}s
               </p>
             </div>
             <button
               onClick={handleClick}
-              className="px-8 py-4 bg-red-600 hover:bg-red-700 text-white text-xl font-bold rounded-lg transition-colors"
+              className={`px-8 py-4 text-white text-xl font-bold rounded-lg transition-colors ${
+                isChristmas
+                  ? 'bg-green-600 hover:bg-green-700'
+                  : 'bg-red-600 hover:bg-red-700'
+              }`}
             >
-              PLAY AGAIN
+              {isChristmas ? 'TRY AGAIN' : 'PLAY AGAIN'}
             </button>
           </div>
         </div>

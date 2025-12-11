@@ -209,6 +209,9 @@ export class DamageSystem {
       const distance = explosionCenter.distanceTo(enemy.position);
 
       if (distance <= blastRadius * 1.2) {
+        // Ensure bounding boxes are current before limb damage calculation
+        enemy.ensureBoundingBoxesUpdated();
+
         // Check line of sight
         if (
           CollisionUtils.hasLineOfSight(

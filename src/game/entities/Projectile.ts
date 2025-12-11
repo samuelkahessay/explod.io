@@ -1,6 +1,15 @@
 import * as THREE from 'three';
 import { Entity } from './Entity';
 import { ProjectileConfig, CollisionResult } from '../types/GameTypes';
+import { ThemeType, getThemeColors } from '@/config/themeConfig';
+
+// Default config for pool initialization
+const DEFAULT_CONFIG: ProjectileConfig = {
+  speed: 50,
+  damage: 100,
+  blastRadius: 5,
+  lifetime: 5,
+};
 
 export class Projectile extends Entity {
   public velocity: THREE.Vector3;
@@ -10,27 +19,86 @@ export class Projectile extends Entity {
   private raycaster: THREE.Raycaster;
   private collidables: THREE.Object3D[] = [];
   private light: THREE.PointLight;
+  private initialized: boolean = false;
+  private theme: ThemeType;
 
   constructor(
     scene: THREE.Scene,
+    theme: ThemeType = 'DEFAULT',
+    position?: THREE.Vector3,
+    direction?: THREE.Vector3,
+    config?: ProjectileConfig,
+    collidables?: THREE.Object3D[]
+  ) {
+    super(scene, position || new THREE.Vector3());
+    this.theme = theme;
+    this.config = config || DEFAULT_CONFIG;
+    this.velocity = new THREE.Vector3();
+    if (direction && config) {
+      this.velocity.copy(direction).normalize().multiplyScalar(config.speed);
+    }
+    this.lifetime = this.config.lifetime;
+    this.collidables = collidables || [];
+
+    this.raycaster = new THREE.Raycaster();
+
+    const themeColors = getThemeColors(theme);
+    this.light = new THREE.PointLight(themeColors.projectile.light, 1, 3);
+    this.mesh = this.createMesh();
+
+    // Only add to scene if fully initialized (not pooled creation)
+    if (position && direction && config) {
+      this.addToScene();
+      this.initialized = true;
+    }
+  }
+
+  /**
+   * Reset projectile for reuse from pool
+   */
+  public reset(
     position: THREE.Vector3,
     direction: THREE.Vector3,
     config: ProjectileConfig,
     collidables: THREE.Object3D[]
-  ) {
-    super(scene, position);
+  ): void {
+    this.position.copy(position);
     this.config = config;
-    this.velocity = direction.clone().normalize().multiplyScalar(config.speed);
+    this.velocity.copy(direction).normalize().multiplyScalar(config.speed);
     this.lifetime = config.lifetime;
     this.collidables = collidables;
+    this.isActive = true;
 
-    this.raycaster = new THREE.Raycaster();
-    this.light = new THREE.PointLight(0xff4400, 1, 3);
-    this.mesh = this.createMesh();
-    this.addToScene();
+    // Update mesh position and orientation
+    this.mesh.position.copy(position);
+    if (this.velocity.lengthSq() > 0) {
+      this.mesh.lookAt(position.clone().add(this.velocity));
+    }
+    this.mesh.visible = true;
+
+    // Add to scene if not already added
+    if (!this.initialized) {
+      this.addToScene();
+      this.initialized = true;
+    }
+  }
+
+  /**
+   * Deactivate projectile for return to pool
+   */
+  public deactivate(): void {
+    this.isActive = false;
+    this.mesh.visible = false;
+    this.collidables = [];
   }
 
   protected createMesh(): THREE.Object3D {
+    return this.theme === 'CHRISTMAS'
+      ? this.createOrnamentMesh()
+      : this.createRocketMesh();
+  }
+
+  private createRocketMesh(): THREE.Object3D {
     const group = new THREE.Group();
 
     // RPG warhead (olive green main body)
@@ -108,6 +176,97 @@ export class Projectile extends Entity {
     this.light.position.z = -0.5;
 
     group.add(warhead, tip, exhaust, flame, innerFlame, this.light);
+    group.position.copy(this.position);
+
+    // Orient toward velocity
+    if (this.velocity.lengthSq() > 0) {
+      group.lookAt(this.position.clone().add(this.velocity));
+    }
+
+    return group;
+  }
+
+  private createOrnamentMesh(): THREE.Object3D {
+    const group = new THREE.Group();
+
+    // Choose random ornament color
+    const ornamentColors = [0xcc0000, 0x00cc00, 0xffd700, 0xc0c0c0]; // Red, green, gold, silver
+    const ornamentColor = ornamentColors[Math.floor(Math.random() * ornamentColors.length)];
+
+    // Main ornament sphere (shiny)
+    const ornamentGeometry = new THREE.SphereGeometry(0.2, 16, 16);
+    const ornamentMaterial = new THREE.MeshStandardMaterial({
+      color: ornamentColor,
+      metalness: 0.9,
+      roughness: 0.1,
+      envMapIntensity: 1.5,
+    });
+    const ornament = new THREE.Mesh(ornamentGeometry, ornamentMaterial);
+    group.add(ornament);
+
+    // Gold cap/top where the hook would be
+    const capGeometry = new THREE.CylinderGeometry(0.06, 0.08, 0.08, 12);
+    const capMaterial = new THREE.MeshStandardMaterial({
+      color: 0xffd700, // Gold
+      metalness: 0.9,
+      roughness: 0.2,
+    });
+    const cap = new THREE.Mesh(capGeometry, capMaterial);
+    cap.position.y = 0.22;
+    group.add(cap);
+
+    // Small fuse/wick on top (the explosive part)
+    const fuseGeometry = new THREE.CylinderGeometry(0.015, 0.02, 0.1, 8);
+    const fuseMaterial = new THREE.MeshBasicMaterial({
+      color: 0x333333,
+    });
+    const fuse = new THREE.Mesh(fuseGeometry, fuseMaterial);
+    fuse.position.y = 0.3;
+    group.add(fuse);
+
+    // Spark on the fuse
+    const sparkGeometry = new THREE.SphereGeometry(0.03, 8, 8);
+    const sparkMaterial = new THREE.MeshBasicMaterial({
+      color: 0xffff00,
+    });
+    const spark = new THREE.Mesh(sparkGeometry, sparkMaterial);
+    spark.position.y = 0.36;
+    group.add(spark);
+
+    // Decorative band around the middle
+    const bandGeometry = new THREE.TorusGeometry(0.2, 0.02, 8, 24);
+    const bandMaterial = new THREE.MeshStandardMaterial({
+      color: 0xffd700,
+      metalness: 0.8,
+      roughness: 0.3,
+    });
+    const band = new THREE.Mesh(bandGeometry, bandMaterial);
+    band.rotation.x = Math.PI / 2;
+    group.add(band);
+
+    // Sparkle trail particles
+    const trailGeometry = new THREE.SphereGeometry(0.04, 6, 6);
+    const trailMaterial = new THREE.MeshBasicMaterial({
+      color: 0xffff99,
+      transparent: true,
+      opacity: 0.8,
+    });
+
+    for (let i = 0; i < 5; i++) {
+      const trail = new THREE.Mesh(trailGeometry, trailMaterial.clone());
+      trail.position.z = 0.3 + i * 0.15;
+      trail.scale.setScalar(1 - i * 0.15);
+      (trail.material as THREE.MeshBasicMaterial).opacity = 0.8 - i * 0.15;
+      group.add(trail);
+    }
+
+    // Trail light (golden sparkle)
+    this.light.color.setHex(0xffd700);
+    this.light.intensity = 2;
+    this.light.distance = 5;
+    this.light.position.z = 0.3;
+
+    group.add(this.light);
     group.position.copy(this.position);
 
     // Orient toward velocity

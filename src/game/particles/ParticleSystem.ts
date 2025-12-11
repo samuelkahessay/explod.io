@@ -26,6 +26,10 @@ export class ParticleSystem {
   protected scene: THREE.Scene;
   protected maxParticles: number;
 
+  // Reusable Vector3 instances to avoid allocations
+  private tempVec1: THREE.Vector3 = new THREE.Vector3();
+  private tempVec2: THREE.Vector3 = new THREE.Vector3();
+
   constructor(
     scene: THREE.Scene,
     maxParticles: number = 1000,
@@ -133,34 +137,42 @@ export class ParticleSystem {
     const colors = this.geometry.attributes.color.array as Float32Array;
     const sizes = this.geometry.attributes.size.array as Float32Array;
 
-    // Clear all positions first
-    for (let i = 0; i < this.maxParticles * 3; i++) {
-      positions[i] = 0;
-    }
-
-    for (let i = this.particles.length - 1; i >= 0; i--) {
+    // Process particles and compact the array
+    let writeIndex = 0;
+    for (let i = 0; i < this.particles.length; i++) {
       const p = this.particles[i];
 
-      // Update physics
-      p.velocity.add(p.acceleration.clone().multiplyScalar(deltaTime));
-      p.position.add(p.velocity.clone().multiplyScalar(deltaTime));
+      // Update physics using reusable vectors to avoid allocations
+      this.tempVec1.copy(p.acceleration).multiplyScalar(deltaTime);
+      p.velocity.add(this.tempVec1);
+      this.tempVec2.copy(p.velocity).multiplyScalar(deltaTime);
+      p.position.add(this.tempVec2);
       p.life -= deltaTime;
 
       if (p.life <= 0) {
-        this.particles.splice(i, 1);
-        continue;
+        continue; // Skip dead particles
       }
 
-      // Update buffers
+      // Keep this particle - move to write position if needed
+      if (writeIndex !== i) {
+        this.particles[writeIndex] = p;
+      }
+
+      // Update buffers at the compacted position
       const lifeRatio = p.life / p.maxLife;
-      positions[i * 3] = p.position.x;
-      positions[i * 3 + 1] = p.position.y;
-      positions[i * 3 + 2] = p.position.z;
-      colors[i * 3] = p.color.r * lifeRatio;
-      colors[i * 3 + 1] = p.color.g * lifeRatio;
-      colors[i * 3 + 2] = p.color.b * lifeRatio;
-      sizes[i] = p.size * lifeRatio;
+      positions[writeIndex * 3] = p.position.x;
+      positions[writeIndex * 3 + 1] = p.position.y;
+      positions[writeIndex * 3 + 2] = p.position.z;
+      colors[writeIndex * 3] = p.color.r * lifeRatio;
+      colors[writeIndex * 3 + 1] = p.color.g * lifeRatio;
+      colors[writeIndex * 3 + 2] = p.color.b * lifeRatio;
+      sizes[writeIndex] = p.size * lifeRatio;
+
+      writeIndex++;
     }
+
+    // Trim the array to only keep live particles
+    this.particles.length = writeIndex;
 
     this.geometry.attributes.position.needsUpdate = true;
     this.geometry.attributes.color.needsUpdate = true;

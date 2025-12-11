@@ -19,6 +19,8 @@ import {
   DISMEMBERMENT_CONFIG,
 } from '@/config/limbConfig';
 import { KNOCKBACK_CONFIG } from '@/config/knockbackConfig';
+import { ThemeType, ChristmasEnemyType, CHRISTMAS_ENEMIES } from '@/config/themeConfig';
+import { CollisionUtils } from '../utils/CollisionUtils';
 
 export class HumanoidEnemy extends Entity implements IDamageable {
   public health: number;
@@ -33,6 +35,9 @@ export class HumanoidEnemy extends Entity implements IDamageable {
 
   // Bounding box for collision
   public boundingBox: THREE.Box3;
+
+  // Dirty flag for lazy bounding box updates
+  private boundingBoxesDirty: boolean = true;
 
   // Limb system
   public limbs: Map<LimbType, LimbData> = new Map();
@@ -88,9 +93,32 @@ export class HumanoidEnemy extends Entity implements IDamageable {
   private recoveryProgress: number = 0;
   private targetRecoveryRotation: THREE.Quaternion = new THREE.Quaternion();
 
-  constructor(scene: THREE.Scene, position: THREE.Vector3, config: EnemyConfig) {
+  // Obstacle collision
+  private collidables: THREE.Object3D[] = [];
+  private readonly COLLISION_RADIUS = 0.5;
+
+  // Theme and enemy type
+  private theme: ThemeType = 'DEFAULT';
+  private christmasEnemyType: ChristmasEnemyType | null = null;
+  private enemyScale: number = 1.0;
+
+  constructor(
+    scene: THREE.Scene,
+    position: THREE.Vector3,
+    config: EnemyConfig,
+    theme: ThemeType = 'DEFAULT',
+    christmasEnemyType: ChristmasEnemyType | null = null
+  ) {
     super(scene, position);
     this.config = config;
+    this.theme = theme;
+    this.christmasEnemyType = christmasEnemyType;
+
+    // Set scale based on Christmas enemy type
+    if (christmasEnemyType) {
+      this.enemyScale = CHRISTMAS_ENEMIES[christmasEnemyType].scale;
+    }
+
     this.health = config.health;
     this.maxHealth = config.health;
     this.speed = config.speed;
@@ -119,10 +147,23 @@ export class HumanoidEnemy extends Entity implements IDamageable {
       rightArm.mesh.add(this.gun);
     }
 
-    // Add eyes to head
+    // Add eyes/face based on enemy type
     const head = this.limbs.get(LimbType.HEAD);
     if (head) {
-      this.createEyes(head.mesh);
+      if (this.christmasEnemyType === 'GINGERBREAD') {
+        this.createGingerbreadFace(head.mesh);
+      } else if (this.christmasEnemyType === 'ELF') {
+        this.createElfFace(head.mesh);
+      } else if (this.christmasEnemyType === 'NUTCRACKER') {
+        this.createNutcrackerFace(head.mesh);
+      } else {
+        this.createEyes(head.mesh);
+      }
+    }
+
+    // Apply scale for Christmas enemy types
+    if (this.enemyScale !== 1.0) {
+      this.limbMeshes.scale.setScalar(this.enemyScale);
     }
 
     group.add(this.limbMeshes);
@@ -143,7 +184,8 @@ export class HumanoidEnemy extends Entity implements IDamageable {
     const dim = LIMB_DIMENSIONS[type];
     const geometry = new THREE.BoxGeometry(dim.width, dim.height, dim.depth);
 
-    const color = type === LimbType.HEAD ? LIMB_COLORS.skin : LIMB_COLORS.body;
+    // Get color based on theme and enemy type
+    const color = this.getLimbColor(type);
 
     const material = new THREE.MeshStandardMaterial({
       color,
@@ -159,6 +201,20 @@ export class HumanoidEnemy extends Entity implements IDamageable {
     // Store limb type in userData for hit detection
     mesh.userData.limbType = type;
     mesh.userData.entityId = this.id;
+
+    // Add invisible hitbox for head (larger than visual mesh for better hit detection)
+    if (type === LimbType.HEAD) {
+      const hitboxSize = 0.55; // Slightly larger than visual head (0.4)
+      const hitboxGeometry = new THREE.BoxGeometry(hitboxSize, hitboxSize, hitboxSize);
+      const hitboxMaterial = new THREE.MeshBasicMaterial({
+        visible: false,
+      });
+      const hitbox = new THREE.Mesh(hitboxGeometry, hitboxMaterial);
+      hitbox.userData.limbType = type;
+      hitbox.userData.entityId = this.id;
+      hitbox.userData.isHitbox = true;
+      mesh.add(hitbox);
+    }
 
     return {
       type,
@@ -195,6 +251,143 @@ export class HumanoidEnemy extends Entity implements IDamageable {
     rightEye.position.set(0.1, 0.05, 0.2);
 
     headMesh.add(leftEye, rightEye);
+  }
+
+  private getLimbColor(type: LimbType): number {
+    // Default colors
+    if (!this.christmasEnemyType) {
+      return type === LimbType.HEAD ? LIMB_COLORS.skin : LIMB_COLORS.body;
+    }
+
+    switch (this.christmasEnemyType) {
+      case 'ELF': {
+        const elfColors = CHRISTMAS_ENEMIES.ELF.colors;
+        if (type === LimbType.HEAD) return elfColors.skin;
+        if (type === LimbType.TORSO) return elfColors.outfit;
+        return elfColors.outfit; // Arms and legs green
+      }
+
+      case 'GINGERBREAD': {
+        const gbColors = CHRISTMAS_ENEMIES.GINGERBREAD.colors;
+        return gbColors.body; // All brown cookie
+      }
+
+      case 'NUTCRACKER': {
+        const ncColors = CHRISTMAS_ENEMIES.NUTCRACKER.colors;
+        if (type === LimbType.HEAD) return ncColors.wood; // Wooden face
+        if (type === LimbType.TORSO) return ncColors.body; // Red uniform
+        if (type === LimbType.LEFT_LEG || type === LimbType.RIGHT_LEG) return ncColors.black; // Black pants
+        return ncColors.body; // Red arms
+      }
+
+      default:
+        return type === LimbType.HEAD ? LIMB_COLORS.skin : LIMB_COLORS.body;
+    }
+  }
+
+  private createGingerbreadFace(headMesh: THREE.Mesh): void {
+    const icingMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff });
+
+    // White icing eyes
+    const eyeGeometry = new THREE.SphereGeometry(0.06, 8, 8);
+    const leftEye = new THREE.Mesh(eyeGeometry, icingMaterial);
+    leftEye.position.set(-0.1, 0.05, 0.2);
+    const rightEye = new THREE.Mesh(eyeGeometry, icingMaterial);
+    rightEye.position.set(0.1, 0.05, 0.2);
+
+    // Black pupils
+    const pupilMaterial = new THREE.MeshBasicMaterial({ color: 0x000000 });
+    const pupilGeometry = new THREE.SphereGeometry(0.03, 6, 6);
+    const leftPupil = new THREE.Mesh(pupilGeometry, pupilMaterial);
+    leftPupil.position.set(-0.1, 0.05, 0.23);
+    const rightPupil = new THREE.Mesh(pupilGeometry, pupilMaterial);
+    rightPupil.position.set(0.1, 0.05, 0.23);
+
+    // Icing smile
+    const smileGeometry = new THREE.TorusGeometry(0.1, 0.02, 8, 12, Math.PI);
+    const smile = new THREE.Mesh(smileGeometry, icingMaterial);
+    smile.position.set(0, -0.08, 0.2);
+    smile.rotation.x = Math.PI / 2;
+    smile.rotation.z = Math.PI;
+
+    headMesh.add(leftEye, rightEye, leftPupil, rightPupil, smile);
+  }
+
+  private createElfFace(headMesh: THREE.Mesh): void {
+    // Regular eyes
+    const eyeGeometry = new THREE.BoxGeometry(0.08, 0.08, 0.05);
+    const eyeMaterial = new THREE.MeshBasicMaterial({ color: 0x000000 });
+
+    const leftEye = new THREE.Mesh(eyeGeometry, eyeMaterial);
+    leftEye.position.set(-0.1, 0.05, 0.2);
+    const rightEye = new THREE.Mesh(eyeGeometry, eyeMaterial);
+    rightEye.position.set(0.1, 0.05, 0.2);
+
+    // Pointy ears
+    const earMaterial = new THREE.MeshStandardMaterial({ color: 0xffcc99 });
+    const earGeometry = new THREE.ConeGeometry(0.08, 0.2, 4);
+
+    const leftEar = new THREE.Mesh(earGeometry, earMaterial);
+    leftEar.position.set(-0.25, 0.1, 0);
+    leftEar.rotation.z = Math.PI / 3;
+
+    const rightEar = new THREE.Mesh(earGeometry, earMaterial);
+    rightEar.position.set(0.25, 0.1, 0);
+    rightEar.rotation.z = -Math.PI / 3;
+
+    // Pointy hat
+    const hatMaterial = new THREE.MeshStandardMaterial({ color: 0xff0000 });
+    const hatGeometry = new THREE.ConeGeometry(0.25, 0.4, 8);
+    const hat = new THREE.Mesh(hatGeometry, hatMaterial);
+    hat.position.set(0, 0.35, 0);
+
+    // White pom-pom
+    const pomMaterial = new THREE.MeshStandardMaterial({ color: 0xffffff });
+    const pomGeometry = new THREE.SphereGeometry(0.08, 8, 8);
+    const pom = new THREE.Mesh(pomGeometry, pomMaterial);
+    pom.position.set(0, 0.55, 0);
+
+    headMesh.add(leftEye, rightEye, leftEar, rightEar, hat, pom);
+  }
+
+  private createNutcrackerFace(headMesh: THREE.Mesh): void {
+    // Large eyes
+    const eyeMaterial = new THREE.MeshBasicMaterial({ color: 0x000000 });
+    const eyeGeometry = new THREE.SphereGeometry(0.06, 8, 8);
+
+    const leftEye = new THREE.Mesh(eyeGeometry, eyeMaterial);
+    leftEye.position.set(-0.1, 0.08, 0.2);
+    const rightEye = new THREE.Mesh(eyeGeometry, eyeMaterial);
+    rightEye.position.set(0.1, 0.08, 0.2);
+
+    // Red circles on cheeks
+    const cheekMaterial = new THREE.MeshStandardMaterial({ color: 0xff0000 });
+    const cheekGeometry = new THREE.CircleGeometry(0.06, 8);
+
+    const leftCheek = new THREE.Mesh(cheekGeometry, cheekMaterial);
+    leftCheek.position.set(-0.15, -0.02, 0.21);
+    const rightCheek = new THREE.Mesh(cheekGeometry, cheekMaterial);
+    rightCheek.position.set(0.15, -0.02, 0.21);
+
+    // Mouth (rectangular, open)
+    const mouthMaterial = new THREE.MeshBasicMaterial({ color: 0x000000 });
+    const mouthGeometry = new THREE.BoxGeometry(0.12, 0.08, 0.02);
+    const mouth = new THREE.Mesh(mouthGeometry, mouthMaterial);
+    mouth.position.set(0, -0.1, 0.2);
+
+    // Tall black hat
+    const hatMaterial = new THREE.MeshStandardMaterial({ color: 0x000000 });
+    const hatGeometry = new THREE.CylinderGeometry(0.22, 0.25, 0.35, 12);
+    const hat = new THREE.Mesh(hatGeometry, hatMaterial);
+    hat.position.set(0, 0.35, 0);
+
+    // Gold band on hat
+    const bandMaterial = new THREE.MeshStandardMaterial({ color: 0xffd700 });
+    const bandGeometry = new THREE.CylinderGeometry(0.26, 0.26, 0.06, 12);
+    const band = new THREE.Mesh(bandGeometry, bandMaterial);
+    band.position.set(0, 0.22, 0);
+
+    headMesh.add(leftEye, rightEye, leftCheek, rightCheek, mouth, hat, band);
   }
 
   public update(deltaTime: number): void {
@@ -234,7 +427,20 @@ export class HumanoidEnemy extends Entity implements IDamageable {
           .normalize();
 
         this.velocity.copy(direction.multiplyScalar(effectiveSpeed));
-        this.position.add(this.velocity.clone().multiplyScalar(deltaTime));
+        const moveVector = this.velocity.clone().multiplyScalar(deltaTime);
+
+        // Check for obstacle collision
+        if (this.collidables.length > 0) {
+          const collision = CollisionUtils.checkMovementCollision(
+            this.position.clone().setY(0.5), // Check at body height
+            moveVector,
+            this.collidables,
+            this.COLLISION_RADIUS
+          );
+          this.position.add(collision.adjustedDirection);
+        } else {
+          this.position.add(moveVector);
+        }
         this.mesh.position.copy(this.position);
 
         // Calculate target rotation
@@ -259,8 +465,11 @@ export class HumanoidEnemy extends Entity implements IDamageable {
       this.updateWalkAnimation(deltaTime, isMoving);
     }
 
-    // Update bounding boxes
-    this.updateBoundingBoxes();
+    // Update bounding boxes only if dirty (lazy update for performance)
+    if (this.boundingBoxesDirty) {
+      this.updateBoundingBoxes();
+      this.boundingBoxesDirty = false;
+    }
 
     // Update fire cooldown
     if (this.fireCooldown > 0) {
@@ -281,6 +490,23 @@ export class HumanoidEnemy extends Entity implements IDamageable {
 
     // Update main bounding box
     this.boundingBox.setFromObject(this.mesh);
+  }
+
+  /**
+   * Force bounding box update on next frame (call before damage calculations)
+   */
+  public invalidateBoundingBoxes(): void {
+    this.boundingBoxesDirty = true;
+  }
+
+  /**
+   * Ensure bounding boxes are up to date (call before accessing them for damage calc)
+   */
+  public ensureBoundingBoxesUpdated(): void {
+    if (this.boundingBoxesDirty) {
+      this.updateBoundingBoxes();
+      this.boundingBoxesDirty = false;
+    }
   }
 
   private updateTargetRotation(): void {
@@ -457,6 +683,9 @@ export class HumanoidEnemy extends Entity implements IDamageable {
     if (!limb || limb.state === LimbState.SEVERED) return false;
 
     limb.state = LimbState.SEVERED;
+
+    // Mark bounding boxes as needing update
+    this.boundingBoxesDirty = true;
 
     // Get world position of the limb before removing
     const worldPos = new THREE.Vector3();
@@ -924,6 +1153,10 @@ export class HumanoidEnemy extends Entity implements IDamageable {
 
   public setTarget(position: THREE.Vector3): void {
     this.targetPosition = position.clone();
+  }
+
+  public setCollidables(collidables: THREE.Object3D[]): void {
+    this.collidables = collidables;
   }
 
   public canFire(): boolean {

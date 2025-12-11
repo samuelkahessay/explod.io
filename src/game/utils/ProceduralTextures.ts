@@ -517,4 +517,179 @@ export class ProceduralTextures {
 
     return new THREE.CanvasTexture(canvas);
   }
+
+  /**
+   * Generate snow texture for Christmas mode floor
+   */
+  static createSnowTexture(size: number = 512): {
+    map: THREE.CanvasTexture;
+    normalMap: THREE.CanvasTexture;
+  } {
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext('2d')!;
+
+    // Base snow color - white with slight blue tint
+    ctx.fillStyle = '#e8e8f0';
+    ctx.fillRect(0, 0, size, size);
+
+    // Add subtle noise for snow texture
+    const imageData = ctx.getImageData(0, 0, size, size);
+    for (let i = 0; i < imageData.data.length; i += 4) {
+      const noise = (Math.random() - 0.5) * 20;
+      // Keep it bright
+      imageData.data[i] = Math.min(255, Math.max(200, imageData.data[i] + noise));
+      imageData.data[i + 1] = Math.min(255, Math.max(200, imageData.data[i + 1] + noise));
+      imageData.data[i + 2] = Math.min(255, Math.max(210, imageData.data[i + 2] + noise + 5)); // Slight blue tint
+    }
+    ctx.putImageData(imageData, 0, 0);
+
+    // Add some subtle sparkle highlights
+    for (let i = 0; i < 50; i++) {
+      const x = Math.random() * size;
+      const y = Math.random() * size;
+      const r = Math.random() * 3 + 1;
+      const gradient = ctx.createRadialGradient(x, y, 0, x, y, r);
+      gradient.addColorStop(0, 'rgba(255, 255, 255, 0.9)');
+      gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
+      ctx.fillStyle = gradient;
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Add subtle snow drift shadows
+    for (let i = 0; i < 8; i++) {
+      const x = Math.random() * size;
+      const y = Math.random() * size;
+      const w = Math.random() * 100 + 50;
+      const h = Math.random() * 30 + 10;
+      const gradient = ctx.createRadialGradient(x, y, 0, x, y, w / 2);
+      gradient.addColorStop(0, 'rgba(200, 210, 220, 0.2)');
+      gradient.addColorStop(1, 'rgba(200, 210, 220, 0)');
+      ctx.fillStyle = gradient;
+      ctx.beginPath();
+      ctx.ellipse(x, y, w / 2, h / 2, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    const map = new THREE.CanvasTexture(canvas);
+    map.wrapS = THREE.RepeatWrapping;
+    map.wrapT = THREE.RepeatWrapping;
+    map.repeat.set(4, 4);
+
+    const normalMap = this.generateNormalMap(canvas, 0.5); // Lower strength for smoother snow
+    normalMap.wrapS = THREE.RepeatWrapping;
+    normalMap.wrapT = THREE.RepeatWrapping;
+    normalMap.repeat.set(4, 4);
+
+    return { map, normalMap };
+  }
+
+  /**
+   * Generate wooden crate texture for Christmas mode obstacles
+   */
+  static createWoodCrateTexture(size: number = 256): {
+    map: THREE.CanvasTexture;
+    normalMap: THREE.CanvasTexture;
+  } {
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext('2d')!;
+
+    // Base wood color
+    ctx.fillStyle = '#8b5a2b';
+    ctx.fillRect(0, 0, size, size);
+
+    // Draw wood planks
+    const plankHeight = size / 4;
+    for (let i = 0; i < 4; i++) {
+      const y = i * plankHeight;
+
+      // Vary plank color slightly
+      const shade = 0.9 + Math.random() * 0.2;
+      const r = Math.floor(139 * shade);
+      const g = Math.floor(90 * shade);
+      const b = Math.floor(43 * shade);
+      ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
+      ctx.fillRect(2, y + 2, size - 4, plankHeight - 4);
+
+      // Wood grain lines
+      ctx.strokeStyle = 'rgba(60, 30, 10, 0.3)';
+      ctx.lineWidth = 1;
+      for (let j = 0; j < 8; j++) {
+        const grainY = y + 4 + j * (plankHeight - 8) / 8;
+        ctx.beginPath();
+        ctx.moveTo(0, grainY);
+
+        // Wavy grain line
+        let grainX = 0;
+        while (grainX < size) {
+          grainX += 10 + Math.random() * 20;
+          const offset = (Math.random() - 0.5) * 3;
+          ctx.lineTo(grainX, grainY + offset);
+        }
+        ctx.stroke();
+      }
+
+      // Plank border shadow
+      ctx.strokeStyle = 'rgba(40, 20, 5, 0.5)';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(2, y + 2, size - 4, plankHeight - 4);
+    }
+
+    // Add cross boards (like crate strapping)
+    ctx.fillStyle = '#6b4423';
+    ctx.fillRect(size * 0.1, 0, size * 0.08, size); // Left strap
+    ctx.fillRect(size * 0.82, 0, size * 0.08, size); // Right strap
+
+    // Nail heads on straps
+    const nailPositions = [
+      [size * 0.14, plankHeight * 0.5],
+      [size * 0.14, plankHeight * 1.5],
+      [size * 0.14, plankHeight * 2.5],
+      [size * 0.14, plankHeight * 3.5],
+      [size * 0.86, plankHeight * 0.5],
+      [size * 0.86, plankHeight * 1.5],
+      [size * 0.86, plankHeight * 2.5],
+      [size * 0.86, plankHeight * 3.5],
+    ];
+
+    nailPositions.forEach(([x, y]) => {
+      // Nail shadow
+      ctx.fillStyle = '#2a1810';
+      ctx.beginPath();
+      ctx.arc(x + 1, y + 1, 4, 0, Math.PI * 2);
+      ctx.fill();
+      // Nail head
+      ctx.fillStyle = '#4a4a4a';
+      ctx.beginPath();
+      ctx.arc(x, y, 3, 0, Math.PI * 2);
+      ctx.fill();
+      // Nail highlight
+      ctx.fillStyle = '#6a6a6a';
+      ctx.beginPath();
+      ctx.arc(x - 1, y - 1, 1, 0, Math.PI * 2);
+      ctx.fill();
+    });
+
+    // Add weathering/dirt
+    for (let i = 0; i < 15; i++) {
+      const x = Math.random() * size;
+      const y = Math.random() * size;
+      const r = Math.random() * 20 + 10;
+      const gradient = ctx.createRadialGradient(x, y, 0, x, y, r);
+      gradient.addColorStop(0, 'rgba(50, 30, 15, 0.2)');
+      gradient.addColorStop(1, 'rgba(50, 30, 15, 0)');
+      ctx.fillStyle = gradient;
+      ctx.fillRect(x - r, y - r, r * 2, r * 2);
+    }
+
+    const map = new THREE.CanvasTexture(canvas);
+    const normalMap = this.generateNormalMap(canvas, 1.5);
+
+    return { map, normalMap };
+  }
 }

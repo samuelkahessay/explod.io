@@ -3,9 +3,10 @@ import { Entity } from './Entity';
 import { ParticleSystem } from '../particles/ParticleSystem';
 import { DebrisSystem } from '../particles/DebrisSystem';
 import { SmokeSystem } from '../particles/SmokeSystem';
-import { ProceduralTextures } from '../utils/ProceduralTextures';
+import { ThemeType, getThemeColors } from '@/config/themeConfig';
 
 export class Explosion extends Entity {
+  private theme: ThemeType = 'DEFAULT';
   public radius: number = 0;
   public maxRadius: number;
   public duration: number;
@@ -31,10 +32,14 @@ export class Explosion extends Entity {
   private debrisEmitted: boolean = false;
   private smokeEmitting: boolean = false;
 
+  // Pool tracking
+  private initialized: boolean = false;
+
   constructor(
     scene: THREE.Scene,
-    position: THREE.Vector3,
-    maxRadius: number,
+    theme: ThemeType = 'DEFAULT',
+    position?: THREE.Vector3,
+    maxRadius?: number,
     duration: number = 2,
     particleSystems?: {
       sparks?: ParticleSystem;
@@ -42,8 +47,9 @@ export class Explosion extends Entity {
       smoke?: SmokeSystem;
     }
   ) {
-    super(scene, position);
-    this.maxRadius = maxRadius;
+    super(scene, position || new THREE.Vector3());
+    this.theme = theme;
+    this.maxRadius = maxRadius || 5;
     this.duration = duration;
 
     // Store particle system references
@@ -55,21 +61,112 @@ export class Explosion extends Entity {
 
     this.light = new THREE.PointLight();
     this.mesh = this.createMesh();
-    this.addToScene();
 
-    // Emit initial burst effects
+    // Only add to scene and emit if fully initialized (not pooled creation)
+    if (position && maxRadius) {
+      this.addToScene();
+      this.initialized = true;
+      this.emitSparks();
+      this.emitDebris();
+    }
+  }
+
+  /**
+   * Reset explosion for reuse from pool
+   */
+  public reset(
+    position: THREE.Vector3,
+    maxRadius: number,
+    duration: number,
+    particleSystems: {
+      sparks?: ParticleSystem;
+      debris?: DebrisSystem;
+      smoke?: SmokeSystem;
+    }
+  ): void {
+    this.position.copy(position);
+    this.maxRadius = maxRadius;
+    this.duration = duration;
+    this.elapsed = 0;
+    this.radius = 0;
+    this.isActive = true;
+
+    // Reset particle systems
+    this.sparkParticles = particleSystems.sparks || null;
+    this.debrisSystem = particleSystems.debris || null;
+    this.smokeSystem = particleSystems.smoke || null;
+
+    // Reset stage tracking
+    this.flashDone = false;
+    this.fireballDone = false;
+    this.shockwaveDone = false;
+    this.sparksEmitted = false;
+    this.debrisEmitted = false;
+    this.smokeEmitting = false;
+
+    // Reset visual components
+    this.mesh.position.copy(position);
+    this.mesh.visible = true;
+
+    if (this.flash) {
+      this.flash.visible = true;
+      this.flash.scale.setScalar(this.maxRadius * 0.3);
+      (this.flash.material as THREE.MeshBasicMaterial).opacity = 1;
+    }
+
+    if (this.fireball) {
+      this.fireball.visible = true;
+      this.fireball.children.forEach((child, i) => {
+        const mesh = child as THREE.Mesh;
+        mesh.scale.setScalar(0.8 - i * 0.15);
+        (mesh.material as THREE.MeshBasicMaterial).opacity = 0.9 - i * 0.15;
+      });
+    }
+
+    if (this.shockwave) {
+      this.shockwave.visible = true;
+      this.shockwave.scale.setScalar(1);
+      this.shockwave.position.y = -position.y + 0.1;
+      (this.shockwave.material as THREE.MeshBasicMaterial).opacity = 0.7;
+    }
+
+    // Reset lights
+    this.light.intensity = 8;
+    this.light.color.setHex(0xffaa44);
+    if (this.flickerLight) {
+      this.flickerLight.intensity = 4;
+    }
+
+    // Add to scene if not already
+    if (!this.initialized) {
+      this.addToScene();
+      this.initialized = true;
+    }
+
+    // Emit initial effects
     this.emitSparks();
     this.emitDebris();
+  }
+
+  /**
+   * Deactivate explosion for return to pool
+   */
+  public deactivate(): void {
+    this.isActive = false;
+    this.mesh.visible = false;
   }
 
   protected createMesh(): THREE.Object3D {
     const group = new THREE.Group();
     group.position.copy(this.position);
 
+    const themeColors = getThemeColors(this.theme);
+    const isChristmas = this.theme === 'CHRISTMAS';
+
     // === FLASH (bright white sphere, very brief) ===
     const flashGeometry = new THREE.SphereGeometry(1, 12, 12);
     const flashMaterial = new THREE.MeshBasicMaterial({
-      color: 0xffffff,
+      color: themeColors.explosion.flash,
       transparent: true,
       opacity: 1,
     });
@@ -79,7 +176,7 @@ export class Explosion extends Entity {
 
     // === FIREBALL (multi-layer expanding spheres) ===
     this.fireball = new THREE.Group();
-    const fireballColors = [0xffff44, 0xffaa00, 0xff6600, 0xff3300];
+    const fireballColors = themeColors.explosion.fireball;
     fireballColors.forEach((color, i) => {
       const geometry = new THREE.SphereGeometry(1, 16, 16);
       const material = new THREE.MeshBasicMaterial({
@@ -97,7 +194,7 @@ export class Explosion extends Entity {
     // === SHOCKWAVE (expanding ring on ground) ===
     const shockwaveGeometry = new THREE.RingGeometry(0.5, 1, 48);
     const shockwaveMaterial = new THREE.MeshBasicMaterial({
-      color: 0xffaa44,
+      color: themeColors.explosion.shockwave,
       transparent: true,
       opacity: 0.7,
       side: THREE.DoubleSide,
@@ -108,11 +205,13 @@ export class Explosion extends Entity {
     group.add(this.shockwave);
 
     // === MAIN LIGHT ===
-    this.light = new THREE.PointLight(0xffaa44, 8, this.maxRadius * 6);
+    const lightColor = isChristmas ? 0xff6666 : 0xffaa44;
+    this.light = new THREE.PointLight(lightColor, 8, this.maxRadius * 6);
     group.add(this.light);
 
     // === FLICKER LIGHT (secondary, for fire effect) ===
-    this.flickerLight = new THREE.PointLight(0xff6600, 4, this.maxRadius * 3);
+    const flickerColor = isChristmas ? 0x00ff00 : 0xff6600;
+    this.flickerLight = new THREE.PointLight(flickerColor, 4, this.maxRadius * 3);
     this.flickerLight.position.y = 0.5;
     group.add(this.flickerLight);
 
@@ -123,12 +222,25 @@ export class Explosion extends Entity {
     if (this.sparksEmitted || !this.sparkParticles) return;
     this.sparksEmitted = true;
 
+    const isChristmas = this.theme === 'CHRISTMAS';
+    const themeColors = getThemeColors(this.theme);
+
     // Emit fast-moving bright sparks
     const sparkCount = 40 + Math.floor(Math.random() * 20);
     for (let i = 0; i < sparkCount; i++) {
       const angle = Math.random() * Math.PI * 2;
       const elevation = Math.random() * Math.PI * 0.7;
       const speed = 12 + Math.random() * 18;
+
+      // Pick random color from debris colors for Christmas (red, green, gold, silver shards)
+      let sparkColor: THREE.Color;
+      if (isChristmas) {
+        const debrisColors = themeColors.explosion.debris;
+        const colorHex = debrisColors[Math.floor(Math.random() * debrisColors.length)];
+        sparkColor = new THREE.Color(colorHex);
+      } else {
+        sparkColor = new THREE.Color(1, 0.8, 0.3);
+      }
 
       this.sparkParticles.emit(this.position.clone(), 1, {
         velocity: new THREE.Vector3(
@@ -137,7 +249,7 @@ export class Explosion extends Entity {
           Math.sin(elevation) * Math.sin(angle) * speed
         ),
         acceleration: new THREE.Vector3(0, -15, 0),
-        color: new THREE.Color(1, 0.8, 0.3),
+        color: sparkColor,
         size: 0.15 + Math.random() * 0.15,
         maxLife: 0.3 + Math.random() * 0.4,
       });

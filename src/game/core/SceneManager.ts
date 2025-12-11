@@ -2,6 +2,11 @@ import * as THREE from 'three';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { ThemeType } from '@/config/themeConfig';
+
+// Layer constants for rendering order
+export const LAYER_DEFAULT = 0;
+export const LAYER_WEAPON = 1;
 
 export class SceneManager {
   public scene: THREE.Scene;
@@ -18,15 +23,32 @@ export class SceneManager {
   private currentBloomStrength: number = 0.3;
   private targetBloomStrength: number = 0.3;
 
-  private container: HTMLElement;
+  // Collidable object caching
+  private cachedCollidables: THREE.Object3D[] = [];
+  private collidablesDirty: boolean = true;
 
-  constructor(container: HTMLElement) {
+  private container: HTMLElement;
+  private theme: ThemeType;
+
+  constructor(container: HTMLElement, theme: ThemeType = 'DEFAULT') {
     this.container = container;
+    this.theme = theme;
+
+    const isChristmas = theme === 'CHRISTMAS';
 
     // Scene
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0x87ceeb);
-    this.scene.fog = new THREE.Fog(0x87ceeb, 20, 100);
+
+    // Set sky/background based on theme
+    if (isChristmas) {
+      // Dark night sky for Christmas
+      this.scene.background = new THREE.Color(0x0a1628);
+      this.scene.fog = new THREE.Fog(0x0a1628, 30, 120);
+    } else {
+      // Light blue sky for default
+      this.scene.background = new THREE.Color(0x87ceeb);
+      this.scene.fog = new THREE.Fog(0x87ceeb, 20, 100);
+    }
 
     // Camera
     const aspect = container.clientWidth / container.clientHeight;
@@ -95,9 +117,35 @@ export class SceneManager {
     }
 
     if (this.usePostProcessing) {
+      // Two-pass rendering: world first, then weapon on top
+      // Pass 1: Render world (layer 0 only)
+      this.camera.layers.set(LAYER_DEFAULT);
       this.composer.render();
-    } else {
+
+      // Pass 2: Render weapon layer on top (clear depth only)
+      this.camera.layers.set(LAYER_WEAPON);
+      this.renderer.autoClear = false;
+      this.renderer.clearDepth();
       this.renderer.render(this.scene, this.camera);
+      this.renderer.autoClear = true;
+
+      // Reset camera to see all layers
+      this.camera.layers.enableAll();
+    } else {
+      // Two-pass rendering without post-processing
+      // Pass 1: Render world
+      this.camera.layers.set(LAYER_DEFAULT);
+      this.renderer.render(this.scene, this.camera);
+
+      // Pass 2: Render weapon layer on top
+      this.camera.layers.set(LAYER_WEAPON);
+      this.renderer.autoClear = false;
+      this.renderer.clearDepth();
+      this.renderer.render(this.scene, this.camera);
+      this.renderer.autoClear = true;
+
+      // Reset camera to see all layers
+      this.camera.layers.enableAll();
     }
   }
 
@@ -139,14 +187,22 @@ export class SceneManager {
   }
 
   public getCollidableObjects(): THREE.Object3D[] {
-    const collidables: THREE.Object3D[] = [];
+    if (this.collidablesDirty) {
+      this.cachedCollidables = [];
+      this.scene.traverse((object) => {
+        if (object.userData.collidable) {
+          this.cachedCollidables.push(object);
+        }
+      });
+      this.collidablesDirty = false;
+    }
+    return this.cachedCollidables;
+  }
 
-    this.scene.traverse((object) => {
-      if (object.userData.collidable) {
-        collidables.push(object);
-      }
-    });
-
-    return collidables;
+  /**
+   * Mark collidables cache as dirty - call when adding/removing collidable objects
+   */
+  public invalidateCollidables(): void {
+    this.collidablesDirty = true;
   }
 }

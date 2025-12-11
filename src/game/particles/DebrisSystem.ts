@@ -19,7 +19,9 @@ export class DebrisSystem {
 
   // Shared geometries for performance
   private geometries: THREE.BufferGeometry[];
-  private material: THREE.MeshStandardMaterial;
+
+  // Pre-created material variants with different shades
+  private materials: THREE.MeshStandardMaterial[] = [];
 
   constructor(scene: THREE.Scene, maxDebris: number = 100) {
     this.scene = scene;
@@ -33,11 +35,17 @@ export class DebrisSystem {
       new THREE.TetrahedronGeometry(0.1),
     ];
 
-    this.material = new THREE.MeshStandardMaterial({
-      color: 0x333333,
-      roughness: 0.8,
-      metalness: 0.3,
-    });
+    // Pre-create material variants with different shades (6 variations)
+    for (let i = 0; i < 6; i++) {
+      const shade = 0.2 + (i / 5) * 0.2; // Range from 0.2 to 0.4
+      this.materials.push(
+        new THREE.MeshStandardMaterial({
+          color: new THREE.Color(shade, shade * 0.95, shade * 0.9),
+          roughness: 0.8,
+          metalness: 0.3,
+        })
+      );
+    }
   }
 
   public emitDebris(
@@ -52,10 +60,8 @@ export class DebrisSystem {
       const geometry =
         this.geometries[Math.floor(Math.random() * this.geometries.length)];
 
-      // Slight color variation
-      const shade = 0.2 + Math.random() * 0.2;
-      const material = this.material.clone();
-      material.color.setRGB(shade, shade * 0.95, shade * 0.9);
+      // Use pre-created shared material with random shade
+      const material = this.materials[Math.floor(Math.random() * this.materials.length)];
 
       const mesh = new THREE.Mesh(geometry, material);
       mesh.position.copy(origin);
@@ -130,15 +136,14 @@ export class DebrisSystem {
       d.life -= deltaTime;
 
       if (d.life < 1) {
-        // Fade out in last second
-        const opacity = d.life;
-        (d.mesh.material as THREE.MeshStandardMaterial).opacity = opacity;
-        (d.mesh.material as THREE.MeshStandardMaterial).transparent = true;
+        // Scale down in last second (can't modify shared material opacity)
+        const scale = Math.max(0.1, d.life);
+        d.mesh.scale.setScalar(scale);
       }
 
       if (d.life <= 0) {
         this.scene.remove(d.mesh);
-        (d.mesh.material as THREE.Material).dispose();
+        // Don't dispose shared materials
         this.debris.splice(i, 1);
       }
     }
@@ -151,7 +156,7 @@ export class DebrisSystem {
   public clear(): void {
     this.debris.forEach((d) => {
       this.scene.remove(d.mesh);
-      (d.mesh.material as THREE.Material).dispose();
+      // Don't dispose shared materials
     });
     this.debris = [];
   }
@@ -159,6 +164,6 @@ export class DebrisSystem {
   public dispose(): void {
     this.clear();
     this.geometries.forEach((g) => g.dispose());
-    this.material.dispose();
+    this.materials.forEach((m) => m.dispose());
   }
 }

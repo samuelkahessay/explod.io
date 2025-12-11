@@ -12,6 +12,18 @@ export class RocketLauncher {
 
   public onProjectileFired: ((projectile: Projectile) => void) | null = null;
 
+  // Optional callback to get muzzle position from weapon view model
+  public getMuzzlePosition: (() => THREE.Vector3) | null = null;
+
+  // Optional callback to acquire projectile from pool (performance optimization)
+  public acquireProjectile: ((
+    scene: THREE.Scene,
+    position: THREE.Vector3,
+    direction: THREE.Vector3,
+    config: ProjectileConfig,
+    collidables: THREE.Object3D[]
+  ) => Projectile) | null = null;
+
   private readonly config = {
     fireRate: GAME_CONFIG.ROCKET_LAUNCHER.FIRE_RATE,
     projectileConfig: {
@@ -46,17 +58,36 @@ export class RocketLauncher {
     const direction = new THREE.Vector3();
     this.camera.getWorldDirection(direction);
 
-    // Fire position slightly in front of camera
-    const position = this.camera.position.clone().add(direction.clone().multiplyScalar(1));
+    // Get muzzle position from weapon view model, or fallback to camera position
+    let position: THREE.Vector3;
+    if (this.getMuzzlePosition) {
+      position = this.getMuzzlePosition();
+    } else {
+      // Fallback: fire position slightly in front of camera
+      position = this.camera.position.clone().add(direction.clone().multiplyScalar(1));
+    }
 
-    // Create projectile
-    const projectile = new Projectile(
-      this.scene,
-      position,
-      direction,
-      this.config.projectileConfig,
-      this.collidables
-    );
+    // Create projectile (use pool if available, otherwise create new)
+    let projectile: Projectile;
+    if (this.acquireProjectile) {
+      projectile = this.acquireProjectile(
+        this.scene,
+        position,
+        direction,
+        this.config.projectileConfig,
+        this.collidables
+      );
+    } else {
+      // Fallback: create without pooling (theme defaults to DEFAULT)
+      projectile = new Projectile(
+        this.scene,
+        'DEFAULT',
+        position,
+        direction,
+        this.config.projectileConfig,
+        this.collidables
+      );
+    }
 
     this.cooldown = 1 / this.config.fireRate;
 

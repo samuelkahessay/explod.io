@@ -3,7 +3,9 @@ import { PointerLockControls } from 'three/addons/controls/PointerLockControls.j
 import { Entity } from './Entity';
 import { IDamageable, InputState } from '../types/GameTypes';
 import { RocketLauncher } from '../weapons/RocketLauncher';
+import { WeaponViewModel } from '../weapons/WeaponViewModel';
 import { GAME_CONFIG } from '@/config/gameConfig';
+import { ThemeType } from '@/config/themeConfig';
 import { CollisionUtils } from '../utils/CollisionUtils';
 
 export class Player extends Entity implements IDamageable {
@@ -25,6 +27,7 @@ export class Player extends Entity implements IDamageable {
 
   // Weapon
   public weapon: RocketLauncher;
+  private weaponViewModel: WeaponViewModel;
 
   // Collidables for movement
   private collidables: THREE.Object3D[] = [];
@@ -37,13 +40,18 @@ export class Player extends Entity implements IDamageable {
   constructor(
     scene: THREE.Scene,
     camera: THREE.PerspectiveCamera,
-    domElement: HTMLElement
+    domElement: HTMLElement,
+    theme: ThemeType = 'DEFAULT'
   ) {
     super(scene, new THREE.Vector3(0, GAME_CONFIG.PLAYER.HEIGHT, 0));
     this.camera = camera;
     this.controls = new PointerLockControls(camera, domElement);
     this.mesh = this.createMesh();
     this.weapon = new RocketLauncher(scene, camera);
+    this.weaponViewModel = new WeaponViewModel(scene, camera, theme);
+
+    // Connect weapon to get muzzle position from view model
+    this.weapon.getMuzzlePosition = () => this.weaponViewModel.getMuzzlePosition();
   }
 
   protected createMesh(): THREE.Object3D {
@@ -94,6 +102,17 @@ export class Player extends Entity implements IDamageable {
     // Apply vertical movement
     this.camera.position.y += this.velocity.y * deltaTime;
 
+    // Check for landing on obstacles (when falling)
+    if (this.velocity.y < 0) {
+      const feetPosition = this.camera.position.y - this.PLAYER_HEIGHT;
+      const landingHeight = this.checkObstacleLanding(feetPosition);
+      if (landingHeight !== null) {
+        this.velocity.y = 0;
+        this.camera.position.y = landingHeight + this.PLAYER_HEIGHT;
+        this.canJump = true;
+      }
+    }
+
     // Ground collision
     if (this.camera.position.y < this.PLAYER_HEIGHT) {
       this.velocity.y = 0;
@@ -108,6 +127,10 @@ export class Player extends Entity implements IDamageable {
 
     // Update weapon
     this.weapon.update(deltaTime);
+
+    // Update weapon view model
+    const isMoving = this.moveDirection.lengthSq() > 0;
+    this.weaponViewModel.update(deltaTime, isMoving, this.velocity);
 
     // Sync position
     this.position.copy(this.camera.position);
@@ -127,7 +150,10 @@ export class Player extends Entity implements IDamageable {
     }
 
     if (input.fire) {
-      this.weapon.fire();
+      const projectile = this.weapon.fire();
+      if (projectile) {
+        this.weaponViewModel.triggerRecoil();
+      }
     }
   }
 
@@ -161,10 +187,46 @@ export class Player extends Entity implements IDamageable {
     return this.controls.isLocked;
   }
 
+  /**
+   * Check if player can land on an obstacle
+   * Returns the obstacle top height if landing, null otherwise
+   */
+  private checkObstacleLanding(feetY: number): number | null {
+    const playerX = this.camera.position.x;
+    const playerZ = this.camera.position.z;
+    const radius = GAME_CONFIG.PLAYER.RADIUS;
+
+    for (const obj of this.collidables) {
+      if (obj.userData?.type !== 'obstacle') continue;
+
+      // Get obstacle bounds
+      const box = new THREE.Box3().setFromObject(obj);
+      const topY = box.max.y;
+
+      // Check if player is within horizontal bounds of obstacle (with some tolerance)
+      const withinX = playerX >= box.min.x - radius && playerX <= box.max.x + radius;
+      const withinZ = playerZ >= box.min.z - radius && playerZ <= box.max.z + radius;
+
+      // Check if feet are at or slightly below the top surface (landing threshold)
+      const landingThreshold = 0.3; // Allow landing if feet are within this distance above the top
+      const atTopSurface = feetY <= topY + landingThreshold && feetY >= topY - 0.1;
+
+      if (withinX && withinZ && atTopSurface) {
+        return topY;
+      }
+    }
+
+    return null;
+  }
+
   public reset(): void {
     this.health = this.maxHealth;
     this.camera.position.set(0, this.PLAYER_HEIGHT, 0);
     this.velocity.set(0, 0, 0);
     this.canJump = true;
+  }
+
+  public dispose(): void {
+    this.weaponViewModel.dispose();
   }
 }
