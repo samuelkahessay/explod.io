@@ -45,7 +45,8 @@ export class Player extends Entity implements IDamageable {
     domElement: HTMLElement,
     theme: ThemeType = 'DEFAULT'
   ) {
-    super(scene, new THREE.Vector3(0, GAME_CONFIG.PLAYER.HEIGHT, 0));
+    // Spawn position offset to avoid center Christmas tree
+    super(scene, new THREE.Vector3(6, GAME_CONFIG.PLAYER.HEIGHT, -8));
     this.camera = camera;
     this.controls = new PointerLockControls(camera, domElement);
     this.mesh = this.createMesh();
@@ -240,7 +241,8 @@ export class Player extends Entity implements IDamageable {
 
   public reset(): void {
     this.health = this.maxHealth;
-    this.camera.position.set(0, this.PLAYER_HEIGHT, 0);
+    // Spawn position offset to avoid center Christmas tree
+    this.camera.position.set(6, this.PLAYER_HEIGHT, -8);
     this.velocity.set(0, 0, 0);
     this.canJump = true;
   }

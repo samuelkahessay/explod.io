@@ -5,11 +5,11 @@ const STORAGE_KEY = 'explodio-theme';
 
 /**
  * Get the current theme from localStorage
- * Returns 'DEFAULT' if no theme is stored or if localStorage is unavailable
+ * Returns 'CHRISTMAS' if no theme is stored or if localStorage is unavailable
  */
 export function getTheme(): ThemeType {
   if (typeof window === 'undefined') {
-    return 'DEFAULT';
+    return 'CHRISTMAS';
   }
 
   try {
@@ -17,9 +17,9 @@ export function getTheme(): ThemeType {
     if (stored === 'CHRISTMAS' || stored === 'DEFAULT') {
       return stored;
     }
-    return 'DEFAULT';
+    return 'CHRISTMAS';
   } catch {
-    return 'DEFAULT';
+    return 'CHRISTMAS';
   }
 }
 

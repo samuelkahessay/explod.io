@@ -169,6 +169,17 @@ export class Arena {
   private createChristmasTree(x: number, z: number, scale: number = 1): void {
     const treeGroup = new THREE.Group();
 
+    // Invisible collision box for spawn prevention (base of tree)
+    const collisionGeometry = new THREE.BoxGeometry(3 * scale, 4 * scale, 3 * scale);
+    const collisionMaterial = new THREE.MeshBasicMaterial({
+      visible: false,
+    });
+    const collisionBox = new THREE.Mesh(collisionGeometry, collisionMaterial);
+    collisionBox.position.set(x, 2 * scale, z);
+    collisionBox.userData.type = 'obstacle';
+    collisionBox.userData.collidable = true;
+    this.scene.add(collisionBox);
+
     // Tree trunk
     const trunkGeometry = new THREE.CylinderGeometry(0.3 * scale, 0.4 * scale, 1 * scale, 8);
     const trunkMaterial = new THREE.MeshStandardMaterial({
