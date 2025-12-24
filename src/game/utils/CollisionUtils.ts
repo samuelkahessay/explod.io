@@ -3,6 +3,7 @@ import { CollisionResult } from '../types/GameTypes';
 
 export class CollisionUtils {
   private static raycaster = new THREE.Raycaster();
+  private static directionScratch = new THREE.Vector3();
 
   /**
    * Cast a ray and return first intersection
@@ -13,17 +14,22 @@ export class CollisionUtils {
     objects: THREE.Object3D[],
     maxDistance: number = Infinity
   ): CollisionResult {
-    this.raycaster.set(origin, direction.clone().normalize());
+    this.directionScratch.copy(direction).normalize();
+    this.raycaster.set(origin, this.directionScratch);
     this.raycaster.far = maxDistance;
 
     const intersects = this.raycaster.intersectObjects(objects, true);
 
     if (intersects.length > 0) {
       const hit = intersects[0];
+      let worldNormal: THREE.Vector3 | undefined;
+      if (hit.face?.normal) {
+        worldNormal = hit.face.normal.clone().transformDirection(hit.object.matrixWorld);
+      }
       return {
         hit: true,
         point: hit.point.clone(),
-        normal: hit.face?.normal?.clone(),
+        normal: worldNormal,
         object: hit.object,
         distance: hit.distance,
       };

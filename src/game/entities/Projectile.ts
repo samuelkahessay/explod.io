@@ -22,6 +22,11 @@ export class Projectile extends Entity {
   private initialized: boolean = false;
   private theme: ThemeType;
 
+  // Scratch vectors to reduce per-frame allocations (not re-entrant)
+  private readonly scratchDirection = new THREE.Vector3();
+  private readonly scratchMovement = new THREE.Vector3();
+  private readonly scratchLookAt = new THREE.Vector3();
+
   constructor(
     scene: THREE.Scene,
     theme: ThemeType = 'DEFAULT',
@@ -72,7 +77,8 @@ export class Projectile extends Entity {
     // Update mesh position and orientation
     this.mesh.position.copy(position);
     if (this.velocity.lengthSq() > 0) {
-      this.mesh.lookAt(position.clone().add(this.velocity));
+      this.scratchLookAt.copy(position).add(this.velocity);
+      this.mesh.lookAt(this.scratchLookAt);
     }
     this.mesh.visible = true;
 
@@ -180,7 +186,8 @@ export class Projectile extends Entity {
 
     // Orient toward velocity
     if (this.velocity.lengthSq() > 0) {
-      group.lookAt(this.position.clone().add(this.velocity));
+      this.scratchLookAt.copy(this.position).add(this.velocity);
+      group.lookAt(this.scratchLookAt);
     }
 
     return group;
@@ -271,7 +278,8 @@ export class Projectile extends Entity {
 
     // Orient toward velocity
     if (this.velocity.lengthSq() > 0) {
-      group.lookAt(this.position.clone().add(this.velocity));
+      this.scratchLookAt.copy(this.position).add(this.velocity);
+      group.lookAt(this.scratchLookAt);
     }
 
     return group;
@@ -296,15 +304,15 @@ export class Projectile extends Entity {
     }
 
     // Move projectile
-    const movement = this.velocity.clone().multiplyScalar(deltaTime);
-    this.position.add(movement);
+    this.scratchMovement.copy(this.velocity).multiplyScalar(deltaTime);
+    this.position.add(this.scratchMovement);
     this.mesh.position.copy(this.position);
 
     return { hit: false };
   }
 
   private checkCollision(deltaTime: number): CollisionResult {
-    const direction = this.velocity.clone().normalize();
+    const direction = this.scratchDirection.copy(this.velocity).normalize();
     const distance = this.velocity.length() * deltaTime + 0.5; // Small buffer
 
     this.raycaster.set(this.position, direction);
@@ -322,7 +330,7 @@ export class Projectile extends Entity {
       }
       return {
         hit: true,
-        point: hit.point.clone(),
+        point: hit.point,
         normal: worldNormal,
         object: hit.object,
         distance: hit.distance,

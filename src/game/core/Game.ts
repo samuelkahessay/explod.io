@@ -22,9 +22,24 @@ import { DustPuff } from '../particles/DustPuff';
 import { GameState, EnemyConfig } from '../types/GameTypes';
 import { LimbType, LimbState } from '../types/LimbTypes';
 import { GAME_CONFIG } from '@/config/gameConfig';
-import { ThemeType, getThemeColors, getRandomChristmasEnemyType, CHRISTMAS_ENEMIES, ChristmasEnemyType } from '@/config/themeConfig';
+import { ThemeType, getRandomChristmasEnemyType, CHRISTMAS_ENEMIES, ChristmasEnemyType } from '@/config/themeConfig';
 import { ObjectPool } from '../utils/ObjectPool';
 import { SpatialHash } from '../utils/SpatialHash';
+
+export interface PerfStats {
+  fps: number;
+  frameMs: number;
+  scaledFrameMs: number;
+  timeScale: number;
+  enemies: number;
+  enemyProjectiles: number;
+  projectiles: number;
+  explosions: number;
+  drawCalls: number;
+  triangles: number;
+  geometries: number;
+  textures: number;
+}
 
 export class Game {
   private sceneManager: SceneManager;
@@ -45,6 +60,11 @@ export class Game {
 
   // Floor mesh reference (always included in projectile collisions since it covers entire arena)
   private floorMesh: THREE.Object3D | null = null;
+
+  // Precomputed bounds for static blockers (walls/obstacles) used for spawn checks and unstuck logic
+  private staticBlockerBounds: THREE.Box3[] = [];
+  private readonly ENEMY_SPAWN_RADIUS = 0.9;
+  private readonly ENEMY_UNSTUCK_RADIUS = 0.55;
 
   private arena: Arena;
   private aiSystem: EnemyAISystem;
@@ -79,18 +99,26 @@ export class Game {
   private spawnTimer: number = 0;
   private readonly SPAWN_INTERVAL = GAME_CONFIG.ENEMY.SPAWN_INTERVAL;
 
+  // UI/state update throttling (avoid 60fps React rerenders)
+  private stateEmitTimer: number = 0;
+  private readonly STATE_EMIT_INTERVAL = 1 / 15; // seconds
+
   // Bullet time settings
   private readonly BULLET_TIME_SCALE = 0.05; // 5% speed when idle
   private readonly NORMAL_TIME_SCALE = 1.0;
   private readonly TIME_SCALE_LERP_SPEED = 8.0; // Smooth transition speed
   private currentTimeScale: number = 1.0;
 
+  // Scratch arrays to reduce per-frame allocations in hot loops
+  private readonly nearbyStaticScratch: THREE.Object3D[] = [];
+  private readonly nearbyEnemiesScratch: THREE.Object3D[] = [];
+  private readonly projectileCollidablesScratch: THREE.Object3D[] = [];
+
   // Callbacks
   public onStateUpdate: ((state: GameState) => void) | null = null;
 
   constructor(container: HTMLElement, theme: ThemeType = 'DEFAULT') {
     this.theme = theme;
-    const themeColors = getThemeColors(theme);
 
     this.sceneManager = new SceneManager(container, theme);
     this.gameLoop = new GameLoop();
@@ -155,6 +183,9 @@ export class Game {
     // Build arena
     this.arena.build();
 
+    // Ensure world matrices are current before computing bounds
+    this.sceneManager.scene.updateMatrixWorld(true);
+
     // Set collidables for weapon and AI
     const collidables = this.sceneManager.getCollidableObjects();
     this.player.setCollidables(collidables);
@@ -169,6 +200,9 @@ export class Game {
         this.spatialHash.insert(obj, 2); // Use radius of 2 for static objects
       }
     }
+
+    // Precompute static bounds used for spawn checks/unstuck
+    this.rebuildStaticBlockerBounds();
 
     // Set up projectile pool acquisition callback
     this.player.weapon.acquireProjectile = (scene, position, direction, config, collidables) => {
@@ -216,11 +250,11 @@ export class Game {
 
     // Smooth interpolation between time scales
     // Use unscaled deltaTime for smooth transition regardless of current time scale
-    const rawDelta = deltaTime / Math.max(this.currentTimeScale, 0.01);
+    const unscaledDelta = deltaTime / Math.max(this.currentTimeScale, 0.01);
     this.currentTimeScale = THREE.MathUtils.lerp(
       this.currentTimeScale,
       targetTimeScale,
-      Math.min(1, this.TIME_SCALE_LERP_SPEED * rawDelta)
+      Math.min(1, this.TIME_SCALE_LERP_SPEED * unscaledDelta)
     );
 
     // Apply time scale to game loop
@@ -278,6 +312,9 @@ export class Game {
     // Update AI
     this.aiSystem.update(deltaTime, this.player);
 
+    // Prevent enemies from ending up inside walls/obstacles (knockback + permissive movement collisions)
+    this.resolveEnemiesOutOfStaticBlockers();
+
     // Clean up dead enemies
     this.cleanupDeadEnemies();
 
@@ -296,8 +333,12 @@ export class Game {
       this.gameOver();
     }
 
-    // Update state
-    this.updateState();
+    // Update UI state (throttled; use unscaled delta so bullet time doesn't slow UI refresh)
+    this.stateEmitTimer += unscaledDelta;
+    if (this.stateEmitTimer >= this.STATE_EMIT_INTERVAL) {
+      this.stateEmitTimer = 0;
+      this.updateState();
+    }
   }
 
   private updateProjectiles(deltaTime: number): void {
@@ -315,15 +356,28 @@ export class Game {
 
     for (const projectile of activeProjectiles) {
       // Use spatial hash to get nearby collidables (much faster than checking all)
-      const nearbyStatic = this.spatialHash.getNearby(projectile.position, 5);
-      const nearbyEnemies = this.enemies
-        .filter((e) => e.isActive && e.position.distanceTo(projectile.position) < 10)
-        .map((e) => e.mesh);
-      // Always include floor (it covers entire arena, not in spatial hash)
-      const collidables = this.floorMesh
-        ? [...nearbyStatic, ...nearbyEnemies, this.floorMesh]
-        : [...nearbyStatic, ...nearbyEnemies];
-      projectile.setCollidables(collidables);
+      this.spatialHash.getNearby(projectile.position, 5, this.nearbyStaticScratch);
+
+      this.nearbyEnemiesScratch.length = 0;
+      const maxEnemyDistSq = 10 * 10;
+      for (const enemy of this.enemies) {
+        if (!enemy.isActive) continue;
+        if (enemy.position.distanceToSquared(projectile.position) < maxEnemyDistSq) {
+          this.nearbyEnemiesScratch.push(enemy.mesh);
+        }
+      }
+
+      this.projectileCollidablesScratch.length = 0;
+      for (const obj of this.nearbyStaticScratch) {
+        this.projectileCollidablesScratch.push(obj);
+      }
+      for (const obj of this.nearbyEnemiesScratch) {
+        this.projectileCollidablesScratch.push(obj);
+      }
+      if (this.floorMesh) {
+        this.projectileCollidablesScratch.push(this.floorMesh);
+      }
+      projectile.setCollidables(this.projectileCollidablesScratch);
 
       const result = projectile.update(deltaTime);
 
@@ -697,6 +751,17 @@ export class Game {
     return new THREE.Vector3(x, 0, z);
   }
 
+  private rebuildStaticBlockerBounds(): void {
+    const collidables = this.sceneManager.getCollidableObjects();
+    this.staticBlockerBounds = [];
+
+    for (const obj of collidables) {
+      const type = obj.userData?.type;
+      if (type !== 'obstacle' && type !== 'wall') continue;
+      this.staticBlockerBounds.push(new THREE.Box3().setFromObject(obj));
+    }
+  }
+
   private isValidSpawnPosition(position: THREE.Vector3): boolean {
     // Check distance from player (only X and Z, ignore Y)
     const playerDistance = Math.sqrt(
@@ -722,27 +787,92 @@ export class Game {
       }
     }
 
-    // Check if position overlaps with any obstacle
-    const collidables = this.sceneManager.getCollidableObjects();
-    const enemyRadius = 0.5;
-    for (const obj of collidables) {
-      if (obj.userData?.type !== 'obstacle') continue;
-
-      const box = new THREE.Box3().setFromObject(obj);
-      // Expand box by enemy radius to prevent spawning too close
-      box.expandByScalar(enemyRadius);
-
+    // Check if spawn overlaps with any wall/obstacle in XZ (ignore Y)
+    const radius = this.ENEMY_SPAWN_RADIUS;
+    for (const box of this.staticBlockerBounds) {
       if (
-        position.x >= box.min.x &&
-        position.x <= box.max.x &&
-        position.z >= box.min.z &&
-        position.z <= box.max.z
+        position.x >= box.min.x - radius &&
+        position.x <= box.max.x + radius &&
+        position.z >= box.min.z - radius &&
+        position.z <= box.max.z + radius
       ) {
         return false;
       }
     }
 
     return true;
+  }
+
+  private resolveEnemiesOutOfStaticBlockers(): void {
+    if (this.staticBlockerBounds.length === 0) return;
+
+    const radius = this.ENEMY_UNSTUCK_RADIUS;
+    const epsilon = 1e-3;
+
+    const arenaHalf = GAME_CONFIG.ARENA.SIZE / 2;
+    const wallHalfThickness = 0.5; // walls are 1 unit thick
+    const arenaMin = -arenaHalf + wallHalfThickness + radius + epsilon;
+    const arenaMax = arenaHalf - wallHalfThickness - radius - epsilon;
+
+    for (const enemy of this.enemies) {
+      if (!enemy.isActive) continue;
+
+      let moved = false;
+
+      // A few iterations in case we get pushed from one blocker into another
+      for (let iter = 0; iter < 3; iter++) {
+        let pushedThisIter = false;
+
+        for (const box of this.staticBlockerBounds) {
+          const minX = box.min.x - radius;
+          const maxX = box.max.x + radius;
+          const minZ = box.min.z - radius;
+          const maxZ = box.max.z + radius;
+
+          const x = enemy.position.x;
+          const z = enemy.position.z;
+
+          if (x > minX && x < maxX && z > minZ && z < maxZ) {
+            const dLeft = x - minX;
+            const dRight = maxX - x;
+            const dFront = z - minZ;
+            const dBack = maxZ - z;
+
+            const minPen = Math.min(dLeft, dRight, dFront, dBack);
+            if (minPen === dLeft) enemy.position.x = minX - epsilon;
+            else if (minPen === dRight) enemy.position.x = maxX + epsilon;
+            else if (minPen === dFront) enemy.position.z = minZ - epsilon;
+            else enemy.position.z = maxZ + epsilon;
+
+            pushedThisIter = true;
+            moved = true;
+          }
+        }
+
+        if (!pushedThisIter) break;
+      }
+
+      // Clamp to inside the arena walls (prevents being pushed outside by knockback)
+      if (enemy.position.x < arenaMin) {
+        enemy.position.x = arenaMin;
+        moved = true;
+      } else if (enemy.position.x > arenaMax) {
+        enemy.position.x = arenaMax;
+        moved = true;
+      }
+      if (enemy.position.z < arenaMin) {
+        enemy.position.z = arenaMin;
+        moved = true;
+      } else if (enemy.position.z > arenaMax) {
+        enemy.position.z = arenaMax;
+        moved = true;
+      }
+
+      if (moved) {
+        enemy.mesh.position.copy(enemy.position);
+        enemy.invalidateBoundingBoxes();
+      }
+    }
   }
 
   private gameOver(): void {
@@ -758,6 +888,26 @@ export class Game {
 
   public getState(): GameState {
     return { ...this.state };
+  }
+
+  public getPerfStats(): PerfStats {
+    const info = this.sceneManager.renderer.info;
+    const enemies = this.enemies.reduce((count, e) => count + (e.isActive ? 1 : 0), 0);
+
+    return {
+      fps: this.gameLoop.currentFps,
+      frameMs: this.gameLoop.lastDeltaMs,
+      scaledFrameMs: this.gameLoop.lastScaledDeltaMs,
+      timeScale: this.gameLoop.timeScale,
+      enemies,
+      enemyProjectiles: this.aiSystem.getEnemyProjectiles().length,
+      projectiles: this.projectilePool.getActiveCount(),
+      explosions: this.explosionPool.getActiveCount(),
+      drawCalls: info.render.calls,
+      triangles: info.render.triangles,
+      geometries: info.memory.geometries,
+      textures: info.memory.textures,
+    };
   }
 
   public restart(): void {
@@ -784,8 +934,11 @@ export class Game {
 
     // Clear AI
     this.aiSystem.dispose();
-    this.aiSystem = new EnemyAISystem(this.sceneManager.scene);
+    this.aiSystem = new EnemyAISystem(this.sceneManager.scene, this.theme);
     this.aiSystem.setObstacles(this.sceneManager.getCollidableObjects());
+
+    // Rebuild static blocker bounds (covers the arena/walls/obstacles)
+    this.rebuildStaticBlockerBounds();
 
     // Recreate gib and blood systems
     this.bloodSystem.destroy();
@@ -806,6 +959,7 @@ export class Game {
       timeElapsed: 0,
       adsProgress: 0,
     };
+    this.stateEmitTimer = 0;
 
     // Spawn initial enemies
     for (let i = 0; i < 3; i++) {

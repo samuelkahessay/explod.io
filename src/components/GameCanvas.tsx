@@ -1,13 +1,14 @@
 'use client';
 
 import React, { useRef, useEffect, useState, useCallback } from 'react';
-import { Game } from '../game/core/Game';
+import { Game, type PerfStats } from '../game/core/Game';
 import { GameState } from '../game/types/GameTypes';
 import { GAME_CONFIG } from '@/config/gameConfig';
 import { ThemeType } from '@/config/themeConfig';
 import { getTheme } from '@/utils/settings';
 import HUD from './HUD';
 import Crosshair from './Crosshair';
+import PerfOverlay from './PerfOverlay';
 
 interface GameCanvasProps {
   onGameOver?: (score: number) => void;
@@ -31,10 +32,14 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onGameOver }) => {
   const [isLocked, setIsLocked] = useState(false);
   const [showGameOver, setShowGameOver] = useState(false);
   const [theme, setTheme] = useState<ThemeType | null>(null);
+  const [perfStats, setPerfStats] = useState<PerfStats | null>(null);
 
   // Load theme on mount - must complete before game initializes
   useEffect(() => {
-    setTheme(getTheme());
+    const id = window.setTimeout(() => {
+      setTheme(getTheme());
+    }, 0);
+    return () => window.clearTimeout(id);
   }, []);
 
   const isChristmas = theme === 'CHRISTMAS';
@@ -51,6 +56,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onGameOver }) => {
     // Create game instance with theme
     const game = new Game(containerRef.current, theme);
     gameRef.current = game;
+    setPerfStats(game.getPerfStats());
 
     // Subscribe to state updates
     game.onStateUpdate = (newState: GameState) => {
@@ -76,10 +82,17 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onGameOver }) => {
 
     // Initialize
     game.init();
+    setPerfStats(game.getPerfStats());
+
+    // Poll perf stats at a low rate to avoid rerendering every frame
+    const perfInterval = window.setInterval(() => {
+      setPerfStats(game.getPerfStats());
+    }, 250);
 
     // Cleanup
     return () => {
       document.removeEventListener('pointerlockchange', handleLockChange);
+      window.clearInterval(perfInterval);
       game.dispose();
     };
   }, [onGameOver, theme]);
@@ -137,6 +150,8 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onGameOver }) => {
         className="w-full h-full cursor-crosshair"
         onClick={handleClick}
       />
+
+      <PerfOverlay stats={perfStats} />
 
       {/* HUD Overlay */}
       {isLocked && !showGameOver && (

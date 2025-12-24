@@ -14,6 +14,11 @@ export class EnemyProjectile extends Entity {
   private playerPosition: THREE.Vector3;
   private theme: ThemeType;
 
+  // Scratch vectors to reduce per-frame allocations (not re-entrant)
+  private readonly scratchDirection = new THREE.Vector3();
+  private readonly scratchMovement = new THREE.Vector3();
+  private readonly scratchLookAt = new THREE.Vector3();
+
   constructor(
     scene: THREE.Scene,
     position: THREE.Vector3,
@@ -24,7 +29,10 @@ export class EnemyProjectile extends Entity {
   ) {
     super(scene, position);
     this.theme = theme;
-    this.velocity = direction.clone().normalize().multiplyScalar(GAME_CONFIG.ENEMY.PROJECTILE_SPEED);
+    this.velocity = new THREE.Vector3()
+      .copy(direction)
+      .normalize()
+      .multiplyScalar(GAME_CONFIG.ENEMY.PROJECTILE_SPEED);
     this.damage = GAME_CONFIG.ENEMY.DAMAGE;
     this.lifetime = 3; // 3 second lifetime
     this.collidables = collidables;
@@ -71,7 +79,8 @@ export class EnemyProjectile extends Entity {
 
     // Orient toward velocity
     if (this.velocity.lengthSq() > 0) {
-      group.lookAt(this.position.clone().add(this.velocity));
+      this.scratchLookAt.copy(this.position).add(this.velocity);
+      group.lookAt(this.scratchLookAt);
     }
 
     return group;
@@ -145,7 +154,8 @@ export class EnemyProjectile extends Entity {
 
     // Orient toward velocity
     if (this.velocity.lengthSq() > 0) {
-      group.lookAt(this.position.clone().add(this.velocity));
+      this.scratchLookAt.copy(this.position).add(this.velocity);
+      group.lookAt(this.scratchLookAt);
     }
 
     return group;
@@ -176,15 +186,15 @@ export class EnemyProjectile extends Entity {
     }
 
     // Move projectile
-    const movement = this.velocity.clone().multiplyScalar(deltaTime);
-    this.position.add(movement);
+    this.scratchMovement.copy(this.velocity).multiplyScalar(deltaTime);
+    this.position.add(this.scratchMovement);
     this.mesh.position.copy(this.position);
 
     return { hit: false, hitPlayer: false };
   }
 
   private checkWallCollision(deltaTime: number): CollisionResult {
-    const direction = this.velocity.clone().normalize();
+    const direction = this.scratchDirection.copy(this.velocity).normalize();
     const distance = this.velocity.length() * deltaTime + 0.2;
 
     this.raycaster.set(this.position, direction);
@@ -202,7 +212,7 @@ export class EnemyProjectile extends Entity {
     if (wallHits.length > 0) {
       return {
         hit: true,
-        point: wallHits[0].point.clone(),
+        point: wallHits[0].point,
         distance: wallHits[0].distance,
       };
     }

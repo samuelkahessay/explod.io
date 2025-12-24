@@ -20,6 +20,10 @@ export class GameLoop {
   // Time scale for bullet time effect
   public timeScale: number = 1.0;
 
+  // Frame timings
+  public lastDeltaMs: number = 0;
+  public lastScaledDeltaMs: number = 0;
+
   public start(): void {
     if (this.isRunning) return;
 
@@ -65,6 +69,9 @@ export class GameLoop {
 
     // Apply time scale for bullet time effect
     const scaledDeltaTime = deltaTime * this.timeScale;
+
+    this.lastDeltaMs = deltaTime * 1000;
+    this.lastScaledDeltaMs = scaledDeltaTime * 1000;
 
     // FPS calculation
     this.frameCount++;

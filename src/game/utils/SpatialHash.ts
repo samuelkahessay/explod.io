@@ -9,6 +9,10 @@ export class SpatialHash {
   private grid: Map<string, Set<THREE.Object3D>> = new Map();
   private objectCells: Map<THREE.Object3D, string[]> = new Map();
 
+  // Scratch storage to reduce allocations in hot queries (not re-entrant)
+  private nearbyScratchSet: Set<THREE.Object3D> = new Set();
+  private cellKeysScratch: string[] = [];
+
   constructor(cellSize: number = 5) {
     this.cellSize = cellSize;
   }
@@ -38,6 +42,25 @@ export class SpatialHash {
       }
     }
     return keys;
+  }
+
+  private fillCellsForObject(
+    position: THREE.Vector3,
+    radius: number,
+    out: string[]
+  ): void {
+    out.length = 0;
+
+    const minX = Math.floor((position.x - radius) / this.cellSize);
+    const maxX = Math.floor((position.x + radius) / this.cellSize);
+    const minZ = Math.floor((position.z - radius) / this.cellSize);
+    const maxZ = Math.floor((position.z + radius) / this.cellSize);
+
+    for (let x = minX; x <= maxX; x++) {
+      for (let z = minZ; z <= maxZ; z++) {
+        out.push(`${x},${z}`);
+      }
+    }
   }
 
   /**
@@ -88,20 +111,32 @@ export class SpatialHash {
   /**
    * Get all objects within a radius of a position
    */
-  public getNearby(position: THREE.Vector3, radius: number): THREE.Object3D[] {
-    const result = new Set<THREE.Object3D>();
-    const cellKeys = this.getCellsForObject(position, radius);
+  public getNearby(
+    position: THREE.Vector3,
+    radius: number,
+    out?: THREE.Object3D[]
+  ): THREE.Object3D[] {
+    this.nearbyScratchSet.clear();
+    this.fillCellsForObject(position, radius, this.cellKeysScratch);
 
-    for (const key of cellKeys) {
+    for (const key of this.cellKeysScratch) {
       const cell = this.grid.get(key);
       if (cell) {
         for (const obj of cell) {
-          result.add(obj);
+          this.nearbyScratchSet.add(obj);
         }
       }
     }
 
-    return Array.from(result);
+    if (!out) {
+      return Array.from(this.nearbyScratchSet);
+    }
+
+    out.length = 0;
+    for (const obj of this.nearbyScratchSet) {
+      out.push(obj);
+    }
+    return out;
   }
 
   /**

@@ -10,8 +10,11 @@ export default function Home() {
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
-    setMounted(true);
-    setThemeState(getTheme());
+    const id = window.setTimeout(() => {
+      setMounted(true);
+      setThemeState(getTheme());
+    }, 0);
+    return () => window.clearTimeout(id);
   }, []);
 
   const toggleChristmasMode = () => {
