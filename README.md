@@ -2,7 +2,7 @@
 
 A fast-paced 3D first-person shooter built for the browser with explosive rocket launcher combat, destructible enemies with limb damage, and AI opponents that fight back.
 
-[Play Now](https://explod.io) | Built with Next.js + Three.js
+[Play Now](https://explodio.vercel.app) | Built with Next.js + Three.js
 
 ## Features
 
