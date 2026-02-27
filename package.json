@@ -1,6 +1,9 @@
 {
-  "name": "explosion_fps_temp",
-  "version": "0.1.0",
+  "name": "explod-io",
+  "version": "1.0.0",
+  "description": "A fast-paced 3D browser FPS with explosive rocket launcher combat and destructible enemies",
+  "author": "Samuel Kahessay",
+  "license": "MIT",
   "private": true,
   "scripts": {
     "dev": "next dev",

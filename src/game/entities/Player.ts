@@ -27,6 +27,12 @@ export class Player extends Entity implements IDamageable {
   private isAiming: boolean = false;
   private baseSpeed: number = GAME_CONFIG.PLAYER.SPEED;
 
+  // Scratch vectors to reduce per-frame allocations (not re-entrant)
+  private readonly scratchForward = new THREE.Vector3();
+  private readonly scratchRight = new THREE.Vector3();
+  private readonly scratchHorizontalMove = new THREE.Vector3();
+  private readonly scratchUp = new THREE.Vector3(0, 1, 0);
+
   // Weapon
   public weapon: RocketLauncher;
   private weaponViewModel: WeaponViewModel;
@@ -74,16 +80,17 @@ export class Player extends Entity implements IDamageable {
     this.velocity.y -= this.GRAVITY * deltaTime;
 
     // Get camera forward and right vectors (horizontal only)
-    const forward = new THREE.Vector3();
+    const forward = this.scratchForward;
     this.camera.getWorldDirection(forward);
     forward.y = 0;
     forward.normalize();
 
-    const right = new THREE.Vector3();
-    right.crossVectors(forward, new THREE.Vector3(0, 1, 0)).normalize();
+    const right = this.scratchRight;
+    right.crossVectors(forward, this.scratchUp).normalize();
 
     // Calculate horizontal movement
-    const horizontalMove = new THREE.Vector3();
+    const horizontalMove = this.scratchHorizontalMove;
+    horizontalMove.set(0, 0, 0);
     horizontalMove.addScaledVector(forward, this.moveDirection.z);
     horizontalMove.addScaledVector(right, this.moveDirection.x);
 

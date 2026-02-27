@@ -1,36 +1,68 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Explod.io
+
+A fast-paced 3D first-person shooter built for the browser with explosive rocket launcher combat, destructible enemies with limb damage, and AI opponents that fight back.
+
+[Play Now](https://explod.io) | Built with Next.js + Three.js
+
+## Features
+
+- **Rocket Launcher Combat** — Fire explosive rockets with blast radius damage and inverse-square falloff physics
+- **Limb Damage System** — Enemies take localized damage with limb severance, blood effects, and gibs
+- **Enemy AI** — Ranged enemies with line-of-sight detection, pathfinding, and return fire
+- **Rocket Jumping** — Use explosion knockback to launch yourself across the arena
+- **ADS (Aim Down Sights)** — Right-click for precision aiming with zoom
+- **Christmas Mode** — Toggle a holiday theme with elves, gingerbread men, nutcrackers, and a snowy arena
+- **Performance Overlay** — Built-in FPS counter and performance diagnostics
+
+## Controls
+
+| Action | Key |
+|--------|-----|
+| Move | WASD |
+| Look | Mouse |
+| Shoot | Left Click |
+| Aim Down Sights | Right Click |
+| Jump | Space |
+| Sprint | Shift |
 
 ## Getting Started
 
-First, run the development server:
-
 ```bash
+# Install dependencies
+npm install
+
+# Run development server
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000) to play.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Tech Stack
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- **Framework:** Next.js 16 (App Router)
+- **3D Engine:** Three.js
+- **Language:** TypeScript
+- **Styling:** Tailwind CSS
 
-## Learn More
+## Project Structure
 
-To learn more about Next.js, take a look at the following resources:
+```
+src/
+├── app/              # Next.js pages and layout
+├── components/       # React components (GameCanvas, HUD, PerfOverlay)
+├── config/           # Game configuration and theme settings
+├── game/
+│   ├── core/         # Game loop, scene manager, input handling
+│   ├── entities/     # Player, enemies, projectiles
+│   ├── systems/      # AI, damage, screen shake
+│   ├── particles/    # Explosion effects, blood, gibs
+│   ├── weapons/      # Rocket launcher
+│   ├── world/        # Arena and lighting
+│   ├── types/        # TypeScript type definitions
+│   └── utils/        # Collision detection, spatial hashing
+└── utils/            # General utilities
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## License
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+[MIT](LICENSE)

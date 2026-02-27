@@ -31,6 +31,11 @@ export interface PerfStats {
   frameMs: number;
   scaledFrameMs: number;
   timeScale: number;
+  postProcessing: boolean;
+  shadows: boolean;
+  pixelRatio: number;
+  pixelRatioCap: number;
+  resolution: { width: number; height: number };
   enemies: number;
   enemyProjectiles: number;
   projectiles: number;
@@ -116,6 +121,26 @@ export class Game {
 
   // Callbacks
   public onStateUpdate: ((state: GameState) => void) | null = null;
+
+  private readonly onPerfKeyDown = (e: KeyboardEvent) => {
+    if (e.repeat) return;
+    if (e.key === 'p' || e.key === 'P') {
+      this.sceneManager.setPostProcessing(!this.sceneManager.getPostProcessingEnabled());
+      return;
+    }
+    if (e.key === 'l' || e.key === 'L') {
+      this.sceneManager.setShadowsEnabled(!this.sceneManager.getShadowsEnabled());
+      return;
+    }
+    if (e.key === '[') {
+      this.sceneManager.setPixelRatioCap(this.sceneManager.getPixelRatioCap() - 0.25);
+      return;
+    }
+    if (e.key === ']') {
+      this.sceneManager.setPixelRatioCap(this.sceneManager.getPixelRatioCap() + 0.25);
+      return;
+    }
+  };
 
   constructor(container: HTMLElement, theme: ThemeType = 'DEFAULT') {
     this.theme = theme;
@@ -216,6 +241,9 @@ export class Game {
     this.gameLoop.setRenderCallback(() => {
       this.sceneManager.render();
     });
+
+    // Perf/quality shortcuts (P: post-processing, L: shadows, [/]: pixel ratio cap)
+    window.addEventListener('keydown', this.onPerfKeyDown);
 
     // Spawn initial enemies
     for (let i = 0; i < 3; i++) {
@@ -899,6 +927,11 @@ export class Game {
       frameMs: this.gameLoop.lastDeltaMs,
       scaledFrameMs: this.gameLoop.lastScaledDeltaMs,
       timeScale: this.gameLoop.timeScale,
+      postProcessing: this.sceneManager.getPostProcessingEnabled(),
+      shadows: this.sceneManager.getShadowsEnabled(),
+      pixelRatio: this.sceneManager.getPixelRatio(),
+      pixelRatioCap: this.sceneManager.getPixelRatioCap(),
+      resolution: this.sceneManager.getRenderSize(),
       enemies,
       enemyProjectiles: this.aiSystem.getEnemyProjectiles().length,
       projectiles: this.projectilePool.getActiveCount(),
@@ -971,6 +1004,7 @@ export class Game {
 
   public dispose(): void {
     this.stop();
+    window.removeEventListener('keydown', this.onPerfKeyDown);
 
     // Clean up pooled entities
     this.projectilePool.releaseAll();

@@ -4,6 +4,8 @@ import { CollisionResult } from '../types/GameTypes';
 export class CollisionUtils {
   private static raycaster = new THREE.Raycaster();
   private static directionScratch = new THREE.Vector3();
+  private static originScratch = new THREE.Vector3();
+  private static wallNormalScratch = new THREE.Vector3();
 
   /**
    * Cast a ray and return first intersection
@@ -18,7 +20,7 @@ export class CollisionUtils {
     this.raycaster.set(origin, this.directionScratch);
     this.raycaster.far = maxDistance;
 
-    const intersects = this.raycaster.intersectObjects(objects, true);
+    const intersects = this.raycaster.intersectObjects(objects, false);
 
     if (intersects.length > 0) {
       const hit = intersects[0];
@@ -48,30 +50,32 @@ export class CollisionUtils {
     radius: number = 0.5
   ): { canMove: boolean; adjustedDirection: THREE.Vector3 } {
     if (moveDirection.lengthSq() === 0) {
-      return { canMove: true, adjustedDirection: moveDirection.clone() };
+      return { canMove: true, adjustedDirection: moveDirection };
     }
 
-    const direction = moveDirection.clone().normalize();
-    const adjustedDirection = moveDirection.clone();
+    const direction = this.directionScratch.copy(moveDirection).normalize();
+    const adjustedDirection = moveDirection;
 
     // Check forward direction
     const forwardResult = this.raycast(
-      position.clone().setY(1), // At body height
+      this.originScratch.copy(position).setY(1), // At body height
       direction,
       objects,
       radius + 0.1
     );
 
     if (forwardResult.hit && forwardResult.distance! < radius) {
-      // Wall sliding - remove component in wall normal direction
       if (forwardResult.normal) {
-        const wallNormal = forwardResult.normal.clone().setY(0).normalize();
+        // Wall sliding - remove component in wall normal direction
+        const wallNormal = this.wallNormalScratch.copy(forwardResult.normal).setY(0).normalize();
         const dot = adjustedDirection.dot(wallNormal);
         if (dot < 0) {
           adjustedDirection.sub(wallNormal.multiplyScalar(dot));
         }
+        return { canMove: true, adjustedDirection };
       }
-      return { canMove: true, adjustedDirection };
+      // No normal available — block movement to prevent clipping
+      return { canMove: false, adjustedDirection: adjustedDirection.set(0, 0, 0) };
     }
 
     return { canMove: true, adjustedDirection };

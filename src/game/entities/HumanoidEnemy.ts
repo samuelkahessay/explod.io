@@ -54,6 +54,16 @@ export class HumanoidEnemy extends Entity implements IDamageable {
   private targetRotation: THREE.Quaternion = new THREE.Quaternion();
   private readonly ROTATION_LERP_SPEED = 8;
 
+  // Scratch objects to reduce per-frame allocations (not re-entrant)
+  private readonly scratchDirection = new THREE.Vector3();
+  private readonly scratchMoveVector = new THREE.Vector3();
+  private readonly scratchCollisionOrigin = new THREE.Vector3();
+  private readonly scratchLookAtPos = new THREE.Vector3();
+  private readonly scratchDisplacement = new THREE.Vector3();
+  private readonly scratchLookDir = new THREE.Vector3();
+  private readonly scratchLookAt = new THREE.Vector3();
+  private readonly rotationHelper = new THREE.Object3D();
+
   // Walking animation
   private walkCycle: number = 0;
   private crawlCycle: number = 0;
@@ -61,7 +71,7 @@ export class HumanoidEnemy extends Entity implements IDamageable {
   private readonly BOB_AMOUNT = 0.08;
 
   // Gun attachment
-  private gun: THREE.Mesh | null = null;
+  private gun: THREE.Object3D | null = null;
   private gunAttachedTo: LimbType = LimbType.RIGHT_ARM;
 
   // Event callbacks for external systems
@@ -187,10 +197,12 @@ export class HumanoidEnemy extends Entity implements IDamageable {
     // Get color based on theme and enemy type
     const color = this.getLimbColor(type);
 
+    // Robot theme has more metallic materials
+    const isRobot = !this.christmasEnemyType;
     const material = new THREE.MeshStandardMaterial({
       color,
-      roughness: 0.7,
-      metalness: 0.3,
+      roughness: isRobot ? 0.4 : 0.7,
+      metalness: isRobot ? 0.8 : 0.3,
     });
 
     const mesh = new THREE.Mesh(geometry, material);
@@ -228,35 +240,74 @@ export class HumanoidEnemy extends Entity implements IDamageable {
     };
   }
 
-  private createGun(): THREE.Mesh {
+  private createGun(): THREE.Object3D {
+    const gunGroup = new THREE.Group();
+
+    // Main gun body
     const gunGeometry = new THREE.BoxGeometry(0.12, 0.12, 0.5);
     const gunMaterial = new THREE.MeshStandardMaterial({
-      color: 0x333333,
+      color: this.christmasEnemyType ? 0x333333 : 0x2a2a3a,
       metalness: 0.9,
       roughness: 0.3,
     });
-    const gun = new THREE.Mesh(gunGeometry, gunMaterial);
-    gun.castShadow = true;
-    return gun;
+    const gunBody = new THREE.Mesh(gunGeometry, gunMaterial);
+    gunBody.castShadow = true;
+    gunGroup.add(gunBody);
+
+    // For robots, add energy weapon effects
+    if (!this.christmasEnemyType) {
+      // Glowing barrel tip
+      const barrelGeometry = new THREE.CylinderGeometry(0.04, 0.04, 0.08, 8);
+      const barrelMaterial = new THREE.MeshBasicMaterial({ color: 0x00ffff });
+      const barrel = new THREE.Mesh(barrelGeometry, barrelMaterial);
+      barrel.rotation.x = Math.PI / 2;
+      barrel.position.z = 0.29;
+      gunGroup.add(barrel);
+    }
+
+    return gunGroup;
   }
 
   private createEyes(headMesh: THREE.Mesh): void {
-    const eyeGeometry = new THREE.BoxGeometry(0.08, 0.08, 0.05);
-    const eyeMaterial = new THREE.MeshBasicMaterial({ color: 0x000000 });
+    // Robot sensor lights (glowing cyan)
+    const eyeGeometry = new THREE.BoxGeometry(0.1, 0.06, 0.06);
+    const eyeMaterial = new THREE.MeshBasicMaterial({ color: 0x00ffff });
 
     const leftEye = new THREE.Mesh(eyeGeometry, eyeMaterial);
-    leftEye.position.set(-0.1, 0.05, 0.2);
+    leftEye.position.set(-0.1, 0.05, 0.21);
 
     const rightEye = new THREE.Mesh(eyeGeometry, eyeMaterial);
-    rightEye.position.set(0.1, 0.05, 0.2);
+    rightEye.position.set(0.1, 0.05, 0.21);
 
-    headMesh.add(leftEye, rightEye);
+    // Add antenna on top
+    const antennaGeometry = new THREE.CylinderGeometry(0.02, 0.02, 0.15, 6);
+    const antennaMaterial = new THREE.MeshStandardMaterial({
+      color: 0x444444,
+      metalness: 0.9,
+      roughness: 0.3,
+    });
+    const antenna = new THREE.Mesh(antennaGeometry, antennaMaterial);
+    antenna.position.set(0, 0.25, 0);
+
+    // Add glowing tip to antenna
+    const tipGeometry = new THREE.SphereGeometry(0.03, 8, 8);
+    const tipMaterial = new THREE.MeshBasicMaterial({ color: 0xff3300 });
+    const tip = new THREE.Mesh(tipGeometry, tipMaterial);
+    tip.position.set(0, 0.33, 0);
+
+    headMesh.add(leftEye, rightEye, antenna, tip);
   }
 
   private getLimbColor(type: LimbType): number {
-    // Default colors
+    // Robot/drone colors for default theme
     if (!this.christmasEnemyType) {
-      return type === LimbType.HEAD ? LIMB_COLORS.skin : LIMB_COLORS.body;
+      if (type === LimbType.HEAD) {
+        return 0xe0e0e0; // Chrome silver head
+      } else if (type === LimbType.TORSO) {
+        return 0xc0d0e0; // Bright steel blue torso
+      } else {
+        return 0xd0e0f0; // Polished aluminum limbs
+      }
     }
 
     switch (this.christmasEnemyType) {
@@ -393,6 +444,15 @@ export class HumanoidEnemy extends Entity implements IDamageable {
   public update(deltaTime: number): void {
     if (!this.isActive) return;
 
+    // Tick down limb flash timers
+    for (const [limbType, flash] of this.limbFlashTimers) {
+      flash.remaining -= deltaTime;
+      if (flash.remaining <= 0) {
+        flash.material.emissive.setHex(0x000000);
+        this.limbFlashTimers.delete(limbType);
+      }
+    }
+
     // Update knockback physics (runs regardless of combat state)
     this.updateKnockbackPhysics(deltaTime);
 
@@ -421,18 +481,18 @@ export class HumanoidEnemy extends Entity implements IDamageable {
       // Move toward target if outside attack range
       if (distanceToTarget > this.config.attackRange) {
         isMoving = true;
-        const direction = new THREE.Vector3()
+        const direction = this.scratchDirection
           .subVectors(this.targetPosition, this.position)
           .setY(0)
           .normalize();
 
-        this.velocity.copy(direction.multiplyScalar(effectiveSpeed));
-        const moveVector = this.velocity.clone().multiplyScalar(deltaTime);
+        this.velocity.copy(direction).multiplyScalar(effectiveSpeed);
+        const moveVector = this.scratchMoveVector.copy(this.velocity).multiplyScalar(deltaTime);
 
         // Check for obstacle collision
         if (this.collidables.length > 0) {
           const collision = CollisionUtils.checkMovementCollision(
-            this.position.clone().setY(0.5), // Check at body height
+            this.scratchCollisionOrigin.copy(this.position).setY(0.5), // Check at body height
             moveVector,
             this.collidables,
             this.COLLISION_RADIUS
@@ -512,16 +572,14 @@ export class HumanoidEnemy extends Entity implements IDamageable {
   private updateTargetRotation(): void {
     if (!this.targetPosition) return;
 
-    const lookAtPos = new THREE.Vector3(
+    this.scratchLookAtPos.set(
       this.targetPosition.x,
       this.mesh.position.y,
       this.targetPosition.z
     );
-
-    const tempObj = new THREE.Object3D();
-    tempObj.position.copy(this.mesh.position);
-    tempObj.lookAt(lookAtPos);
-    this.targetRotation.copy(tempObj.quaternion);
+    this.rotationHelper.position.copy(this.mesh.position);
+    this.rotationHelper.lookAt(this.scratchLookAtPos);
+    this.targetRotation.copy(this.rotationHelper.quaternion);
   }
 
   private updateWalkAnimation(deltaTime: number, isMoving: boolean): void {
@@ -834,17 +892,22 @@ export class HumanoidEnemy extends Entity implements IDamageable {
     this.limbMeshes.add(stump);
   }
 
+  // Tracks per-limb flash timers for damage feedback (seconds remaining)
+  private limbFlashTimers: Map<LimbType, { material: THREE.MeshStandardMaterial; remaining: number }> = new Map();
+
   private flashLimbDamage(limb: LimbData): void {
     if (limb.state === LimbState.SEVERED) return;
 
     const material = limb.mesh.material as THREE.MeshStandardMaterial;
     material.emissive.setHex(0xff0000);
 
-    setTimeout(() => {
-      if (material) {
-        material.emissive.setHex(0x000000);
+    // Find the limb type for this limb data
+    for (const [limbType, limbData] of this.limbs.entries()) {
+      if (limbData === limb) {
+        this.limbFlashTimers.set(limbType, { material, remaining: 0.1 });
+        break;
       }
-    }, 100);
+    }
   }
 
   // Legacy damage method for compatibility
@@ -942,10 +1005,8 @@ export class HumanoidEnemy extends Entity implements IDamageable {
    */
   private updateStaggerState(deltaTime: number): void {
     // Apply knockback velocity to position
-    const displacement = this.knockbackState.velocity
-      .clone()
-      .multiplyScalar(deltaTime);
-    this.position.add(displacement);
+    this.scratchDisplacement.copy(this.knockbackState.velocity).multiplyScalar(deltaTime);
+    this.position.add(this.scratchDisplacement);
     this.mesh.position.copy(this.position);
 
     // Decay velocity (friction) - frame-rate independent
@@ -1053,15 +1114,15 @@ export class HumanoidEnemy extends Entity implements IDamageable {
 
     // Calculate target rotation (face toward player if we have a target)
     if (this.targetPosition) {
-      const lookDir = new THREE.Vector3()
+      const lookDir = this.scratchLookDir
         .subVectors(this.targetPosition, this.position)
         .setY(0)
         .normalize();
 
-      const tempObj = new THREE.Object3D();
-      tempObj.position.copy(this.position);
-      tempObj.lookAt(this.position.clone().add(lookDir));
-      this.targetRecoveryRotation.copy(tempObj.quaternion);
+      this.scratchLookAt.copy(this.position).add(lookDir);
+      this.rotationHelper.position.copy(this.position);
+      this.rotationHelper.lookAt(this.scratchLookAt);
+      this.targetRecoveryRotation.copy(this.rotationHelper.quaternion);
     } else {
       // If no target, just stabilize to current facing
       this.targetRecoveryRotation.copy(this.currentRotation);
@@ -1211,31 +1272,25 @@ export class HumanoidEnemy extends Entity implements IDamageable {
   }
 
   public destroy(): void {
-    // Clean up all limb meshes
-    this.limbs.forEach((limb) => {
-      if (limb.mesh.geometry) {
-        limb.mesh.geometry.dispose();
-      }
-      if (limb.mesh.material) {
-        if (Array.isArray(limb.mesh.material)) {
-          limb.mesh.material.forEach((m) => m.dispose());
-        } else {
-          limb.mesh.material.dispose();
-        }
+    // Dispose all meshes still owned by this enemy (limb children like eyes/antenna/stumps included).
+    // Severed limbs are removed from this mesh and handed off to the gib system, so they are not disposed here.
+    const geometries = new Set<THREE.BufferGeometry>();
+    const materials = new Set<THREE.Material>();
+
+    this.mesh.traverse((obj) => {
+      if (!(obj instanceof THREE.Mesh)) return;
+      geometries.add(obj.geometry);
+
+      const material = obj.material;
+      if (Array.isArray(material)) {
+        material.forEach((m) => materials.add(m));
+      } else {
+        materials.add(material);
       }
     });
 
-    // Clean up gun
-    if (this.gun) {
-      if (this.gun.geometry) this.gun.geometry.dispose();
-      if (this.gun.material) {
-        if (Array.isArray(this.gun.material)) {
-          this.gun.material.forEach((m) => m.dispose());
-        } else {
-          this.gun.material.dispose();
-        }
-      }
-    }
+    geometries.forEach((g) => g.dispose());
+    materials.forEach((m) => m.dispose());
 
     super.destroy();
   }

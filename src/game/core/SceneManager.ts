@@ -18,6 +18,10 @@ export class SceneManager {
   private bloomPass: UnrealBloomPass;
   private usePostProcessing: boolean = true;
 
+  // Quality controls
+  private pixelRatioCap: number = 2;
+  private shadowsEnabled: boolean = true;
+
   // Bloom configuration
   private baseBloomStrength: number = 0.3;
   private currentBloomStrength: number = 0.3;
@@ -32,6 +36,8 @@ export class SceneManager {
   // Collidable object caching
   private cachedCollidables: THREE.Object3D[] = [];
   private collidablesDirty: boolean = true;
+
+  private sizeScratch = new THREE.Vector2();
 
   private container: HTMLElement;
   private theme: ThemeType;
@@ -68,8 +74,9 @@ export class SceneManager {
       powerPreference: 'high-performance',
     });
     this.renderer.setSize(container.clientWidth, container.clientHeight);
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, this.pixelRatioCap));
     this.renderer.shadowMap.enabled = true;
+    this.shadowsEnabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1;
@@ -101,6 +108,9 @@ export class SceneManager {
   }
 
   private onResize = (): void => {
+    // Respect pixel ratio cap (also used by performance tuning shortcuts)
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, this.pixelRatioCap));
+
     const width = this.container.clientWidth;
     const height = this.container.clientHeight;
 
@@ -109,6 +119,7 @@ export class SceneManager {
 
     this.renderer.setSize(width, height);
     this.composer.setSize(width, height);
+    this.bloomPass.setSize(width, height);
   };
 
   public render(): void {
@@ -209,6 +220,37 @@ export class SceneManager {
    */
   public setPostProcessing(enabled: boolean): void {
     this.usePostProcessing = enabled;
+  }
+
+  public getPostProcessingEnabled(): boolean {
+    return this.usePostProcessing;
+  }
+
+  public setShadowsEnabled(enabled: boolean): void {
+    this.shadowsEnabled = enabled;
+    this.renderer.shadowMap.enabled = enabled;
+  }
+
+  public getShadowsEnabled(): boolean {
+    return this.shadowsEnabled;
+  }
+
+  public setPixelRatioCap(cap: number): void {
+    this.pixelRatioCap = Math.max(0.5, Math.min(2, cap));
+    this.onResize();
+  }
+
+  public getPixelRatioCap(): number {
+    return this.pixelRatioCap;
+  }
+
+  public getPixelRatio(): number {
+    return this.renderer.getPixelRatio();
+  }
+
+  public getRenderSize(): { width: number; height: number } {
+    this.renderer.getSize(this.sizeScratch);
+    return { width: this.sizeScratch.x, height: this.sizeScratch.y };
   }
 
   /**

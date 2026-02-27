@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-import { Enemy } from '../entities/Enemy';
 import { HumanoidEnemy } from '../entities/HumanoidEnemy';
 import { EnemyProjectile } from '../entities/EnemyProjectile';
 import { Player } from '../entities/Player';
@@ -7,11 +6,8 @@ import { CollisionUtils } from '../utils/CollisionUtils';
 import { GAME_CONFIG } from '@/config/gameConfig';
 import { ThemeType } from '@/config/themeConfig';
 
-// Support both Enemy types
-type AnyEnemy = Enemy | HumanoidEnemy;
-
 interface EnemyAIState {
-  enemy: AnyEnemy;
+  enemy: HumanoidEnemy;
   state: 'idle' | 'chase' | 'attack';
 }
 
@@ -43,7 +39,7 @@ export class EnemyAISystem {
     this.obstacles = obstacles;
   }
 
-  public addEnemy(enemy: AnyEnemy): void {
+  public addEnemy(enemy: HumanoidEnemy): void {
     this.enemies.set(enemy.id, {
       enemy,
       state: 'idle',
@@ -59,7 +55,7 @@ export class EnemyAISystem {
     this.visibilityCache.delete(enemyId);
   }
 
-  public getEnemies(): AnyEnemy[] {
+  public getEnemies(): HumanoidEnemy[] {
     return Array.from(this.enemies.values()).map((e) => e.enemy);
   }
 
@@ -141,7 +137,7 @@ export class EnemyAISystem {
     return visible;
   }
 
-  private fireAtPlayer(enemy: AnyEnemy, player: Player): void {
+  private fireAtPlayer(enemy: HumanoidEnemy, player: Player): void {
     enemy.fire();
 
     const firePosition = enemy.getFirePosition();

@@ -17,8 +17,8 @@ const GameCanvas = dynamic(() => import('../../components/GameCanvas'), {
 });
 
 export default function GamePage() {
-  const handleGameOver = (score: number) => {
-    console.log('Game Over! Final Score:', score);
+  const handleGameOver = (_score: number) => {
+    // Game over handler — hook into analytics or leaderboard here
   };
 
   return (

@@ -53,28 +53,63 @@ export class EnemyProjectile extends Entity {
   private createDefaultMesh(): THREE.Object3D {
     const group = new THREE.Group();
 
-    // Simple glowing bullet
-    const bulletGeometry = new THREE.SphereGeometry(0.1, 8, 8);
-    const bulletMaterial = new THREE.MeshBasicMaterial({
-      color: 0xff0000,
+    // Energy plasma bolt (cyan/blue)
+    const coreGeometry = new THREE.SphereGeometry(0.08, 8, 8);
+    const coreMaterial = new THREE.MeshStandardMaterial({
+      color: 0x00ffff,
+      emissive: 0x00ffff,
+      emissiveIntensity: 1.2,
+      metalness: 0.5,
+      roughness: 0.2,
     });
-    const bullet = new THREE.Mesh(bulletGeometry, bulletMaterial);
+    const core = new THREE.Mesh(coreGeometry, coreMaterial);
+    group.add(core);
 
-    // Trail
-    const trailGeometry = new THREE.CylinderGeometry(0.05, 0.1, 0.3, 8);
-    const trailMaterial = new THREE.MeshBasicMaterial({
-      color: 0xff4400,
+    // Outer glow sphere
+    const glowGeometry = new THREE.SphereGeometry(0.12, 8, 8);
+    const glowMaterial = new THREE.MeshBasicMaterial({
+      color: 0x0088ff,
       transparent: true,
-      opacity: 0.6,
+      opacity: 0.4,
+    });
+    const glow = new THREE.Mesh(glowGeometry, glowMaterial);
+    group.add(glow);
+
+    // Energy trail
+    const trailGeometry = new THREE.CylinderGeometry(0.04, 0.08, 0.35, 8);
+    const trailMaterial = new THREE.MeshBasicMaterial({
+      color: 0x0099ff,
+      transparent: true,
+      opacity: 0.5,
     });
     const trail = new THREE.Mesh(trailGeometry, trailMaterial);
     trail.rotation.x = Math.PI / 2;
-    trail.position.z = -0.2;
+    trail.position.z = -0.22;
+    group.add(trail);
 
-    // Light
-    const light = new THREE.PointLight(0xff0000, 0.5, 2);
+    // Electric arcs (small rotating rings)
+    const arcGeometry = new THREE.TorusGeometry(0.1, 0.015, 6, 8);
+    const arcMaterial = new THREE.MeshBasicMaterial({
+      color: 0x88ffff,
+      transparent: true,
+      opacity: 0.7,
+    });
+    const arc1 = new THREE.Mesh(arcGeometry, arcMaterial);
+    arc1.rotation.x = Math.PI / 2;
+    arc1.rotation.z = Math.random() * Math.PI;
+    group.add(arc1);
 
-    group.add(bullet, trail, light);
+    const arc2 = new THREE.Mesh(arcGeometry, arcMaterial);
+    arc2.rotation.x = Math.PI / 2;
+    arc2.rotation.z = Math.random() * Math.PI;
+    arc2.scale.setScalar(0.7);
+    arc2.position.z = -0.1;
+    group.add(arc2);
+
+    // Bright cyan point light
+    const light = new THREE.PointLight(0x00ffff, 0.8, 3);
+    group.add(light);
+
     group.position.copy(this.position);
 
     // Orient toward velocity

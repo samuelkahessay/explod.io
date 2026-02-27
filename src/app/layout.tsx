@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Explosion FPS - Browser Rocket Launcher Game",
-  description: "A Krunker.io-style browser-based FPS game with explosive weapons",
+  title: "Explod.io - Browser Rocket Launcher Game",
+  description: "A fast-paced browser-based FPS with explosive rocket launcher combat and destructible enemies",
 };
 
 export default function RootLayout({

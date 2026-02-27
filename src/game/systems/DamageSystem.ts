@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-import { Enemy } from '../entities/Enemy';
 import { HumanoidEnemy } from '../entities/HumanoidEnemy';
 import { Player } from '../entities/Player';
 import { CollisionUtils } from '../utils/CollisionUtils';
@@ -14,7 +13,7 @@ export interface KnockbackData {
 
 export interface BlastDamageResult {
   enemiesHit: Array<{
-    enemy: Enemy | HumanoidEnemy;
+    enemy: HumanoidEnemy;
     damage: number;
     knockback: KnockbackData;
   }>;
@@ -120,71 +119,8 @@ export class DamageSystem {
   }
 
   /**
-   * Calculate and apply blast radius damage with knockback (legacy - for old Enemy class)
-   * Damage falls off using inverse square law
-   */
-  static calculateBlastDamage(
-    explosionCenter: THREE.Vector3,
-    blastRadius: number,
-    baseDamage: number,
-    enemies: Enemy[],
-    player: Player,
-    obstacles: THREE.Object3D[]
-  ): BlastDamageResult {
-    const result: BlastDamageResult = {
-      enemiesHit: [],
-      playerHit: false,
-      playerDamage: 0,
-      playerKnockback: null,
-    };
-
-    // Check each enemy
-    for (const enemy of enemies) {
-      if (!enemy.isActive) continue;
-
-      const distance = explosionCenter.distanceTo(enemy.position);
-
-      if (distance <= blastRadius * 1.2) {
-        // Slightly extended range for knockback
-        // Check line of sight (explosion blocked by walls)
-        if (
-          CollisionUtils.hasLineOfSight(
-            explosionCenter,
-            enemy.position,
-            obstacles
-          )
-        ) {
-          const damageMultiplier = this.calculateFalloff(distance, blastRadius);
-          const damage = Math.floor(baseDamage * damageMultiplier);
-          const knockback = this.calculateKnockback(
-            explosionCenter,
-            enemy.position,
-            damageMultiplier
-          );
-
-          enemy.takeDamage(damage);
-
-          // Apply knockback to enemy if method exists
-          if (typeof enemy.applyKnockback === 'function') {
-            const knockbackVector = knockback.direction
-              .clone()
-              .multiplyScalar(knockback.force);
-            enemy.applyKnockback(knockbackVector);
-          }
-
-          result.enemiesHit.push({ enemy, damage, knockback });
-        }
-      }
-    }
-
-    // Check player (self-damage)
-    this.applyPlayerDamage(explosionCenter, blastRadius, baseDamage, player, obstacles, result);
-
-    return result;
-  }
-
-  /**
-   * Calculate blast damage with limb-specific targeting for HumanoidEnemy
+   * Calculate and apply blast radius damage with limb-specific targeting and knockback.
+   * Damage falls off using inverse square law.
    */
   static calculateBlastDamageWithLimbs(
     explosionCenter: THREE.Vector3,
